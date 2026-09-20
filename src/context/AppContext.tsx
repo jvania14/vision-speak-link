@@ -50,7 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.dataset.textSize = preferences.textSize;
+    root.dataset["textSize"] = preferences.textSize;
     root.classList.toggle("high-contrast", preferences.highContrast);
     root.classList.toggle("reduce-motion", preferences.reducedMotion);
     root.classList.toggle("light", preferences.lightMode);
