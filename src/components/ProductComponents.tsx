@@ -1,0 +1,53 @@
+import { motion } from "motion/react";
+import { AlertTriangle, Camera, CircleDot, Ear, Hand, MessageSquareText, ScanLine, Volume2, Waves } from "lucide-react";
+import { getVideoFeedUrl } from "@/services/api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { CommunicationEntry } from "@/context/AppContext";
+
+export function SectionLabel({ children }: { children: React.ReactNode }) { return <p className="eyebrow">{children}</p>; }
+
+export function CameraFeed({ online }: { online: boolean }) {
+  return (
+    <section className="panel overflow-hidden" aria-label="Live camera">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div><SectionLabel>Live camera</SectionLabel><p className="mt-1 text-xs text-muted-foreground">Flask video stream</p></div>
+        <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground"><span className={`size-2 rounded-full ${online ? "bg-success" : "bg-warning"}`} />{online ? "CAMERA ACTIVE" : "BACKEND DISCONNECTED"}</span>
+      </div>
+      <div className="relative aspect-video min-h-72 overflow-hidden bg-camera">
+        {online ? <img src={getVideoFeedUrl()} alt="Live camera stream used for ASL gesture recognition" className="size-full object-cover" /> : <div className="absolute inset-0 grid place-items-center px-6 text-center"><div><Camera className="mx-auto size-12 text-primary/70"/><p className="mt-4 font-medium">Waiting for camera stream</p><p className="mt-2 text-sm text-muted-foreground">Start the recognition backend to connect.</p></div></div>}
+        <div className="scan-line absolute inset-x-0 top-1/2 h-px bg-primary/70 shadow-scan" />
+        <div className="absolute left-4 top-4 space-y-2">
+          <div className="overlay-chip"><Hand /> HAND DETECTION <span>{online ? "CONNECTED" : "WAITING"}</span></div>
+          <div className="overlay-chip"><CircleDot /> ASL CLASSIFICATION <span>{online ? "READY" : "WAITING"}</span></div>
+        </div>
+        <div className="absolute bottom-4 right-4 rounded-md border border-border bg-background/80 px-3 py-2 font-mono text-[0.65rem] text-muted-foreground backdrop-blur-md">STATUS: {online ? "PROCESSING" : "WAITING FOR BACKEND"}</div>
+      </div>
+    </section>
+  );
+}
+
+export function RecognitionCard({ recognizedCharacter, confidence, status }: { recognizedCharacter: string; confidence: number | undefined; status: string }) {
+  return <section className="panel flex h-full flex-col p-6"><div className="flex items-center justify-between"><SectionLabel>Live recognition</SectionLabel><Waves className="size-5 text-primary" /></div><div className="grid flex-1 place-items-center py-8 text-center"><div><motion.div animate={recognizedCharacter ? { scale: [1, 1.04, 1] } : {}} className="mx-auto grid size-40 place-items-center rounded-full border border-primary/30 bg-primary/8 font-display text-7xl font-semibold text-primary shadow-glow">{recognizedCharacter || "—"}</motion.div><p className="mt-6 text-sm font-medium text-muted-foreground">{status}</p></div></div><div className="border-t border-border pt-5"><div className="flex justify-between text-sm"><span className="text-muted-foreground">Confidence</span><span className="font-mono text-foreground">{confidence === undefined ? "Awaiting data" : `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%`}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><motion.div className="h-full bg-primary" animate={{ width: confidence === undefined ? "0%" : `${confidence <= 1 ? confidence * 100 : confidence}%` }} /></div></div></section>;
+}
+
+const stages = [
+  [Camera, "CAPTURE", "Camera"], [Hand, "DETECT", "MediaPipe"], [ScanLine, "CLASSIFY", "ML Model"], [MessageSquareText, "DISPLAY", "Text"], [Volume2, "SPEAK", "Audio"],
+] as const;
+export function RecognitionPipeline({ active }: { active: boolean }) {
+  return <section className="panel p-5"><SectionLabel>Recognition pipeline</SectionLabel><div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-5">{stages.map(([Icon,label,detail], index) => <div key={label} className="relative flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-4 sm:flex-col sm:text-center"><span className={`grid size-10 shrink-0 place-items-center rounded-md ${active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}><Icon className="size-5" /></span><div><p className="text-xs font-bold tracking-[0.12em]">{label}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></div>{index < stages.length - 1 && <span className="absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 text-primary sm:block">›</span>}</div>)}</div></section>;
+}
+
+export function MessageComposer({ value, setValue, onClear, onSpeak, clearing }: { value: string; setValue: (v:string)=>void; onClear:()=>void; onSpeak:()=>void; clearing?: boolean }) {
+  return <section className="panel p-5 sm:p-6"><div className="flex items-center justify-between"><SectionLabel>Your message</SectionLabel><span className="text-xs text-muted-foreground">Editable before speech</span></div><Textarea value={value} onChange={(event) => setValue(event.target.value.toUpperCase())} placeholder="Recognized text will appear here…" aria-label="Your message" className="mt-5 min-h-36 resize-none border-0 bg-transparent p-0 font-display text-3xl font-semibold leading-snug shadow-none focus-visible:ring-0 sm:text-4xl"/><div className="mt-5 flex flex-wrap gap-3 border-t border-border pt-5"><Button size="lg" onClick={onSpeak} disabled={!value.trim()}><Volume2 /> Speak</Button><Button size="lg" variant="secondary" onClick={() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Your message"]')?.focus()}><MessageSquareText /> Edit</Button><Button size="lg" variant="outline" onClick={onClear} disabled={clearing}><span className="text-lg">↻</span>{clearing ? "Clearing" : "Clear"}</Button></div></section>;
+}
+
+const quick = [
+  [AlertTriangle, "PAIN", "I AM EXPERIENCING PAIN"], [Waves, "WATER", "I NEED WATER"], [CircleDot, "MEDICINE", "I NEED MY MEDICINE"], [MessageSquareText, "FOOD", "I NEED FOOD"], [Hand, "HELP", "I NEED HELP"], [AlertTriangle, "EMERGENCY", "I NEED IMMEDIATE HELP"],
+] as const;
+export function HealthcareQuickActions({ onSelect, onEmergency }: { onSelect:(phrase:string)=>void; onEmergency:()=>void }) { return <section><SectionLabel>Quick healthcare needs</SectionLabel><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{quick.map(([Icon,label,phrase]) => <Button key={label} variant={label === "EMERGENCY" ? "destructive" : "outline"} className="h-24 flex-col gap-2 bg-surface" onClick={() => label === "EMERGENCY" ? onEmergency() : onSelect(phrase)}><Icon className="size-5"/><span className="text-xs tracking-[0.1em]">{label}</span></Button>)}</div></section>; }
+
+export function EmergencyModal({ open, onOpenChange, onSpeak }: { open:boolean; onOpenChange:(v:boolean)=>void; onSpeak:()=>void }) { return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="border-destructive/40 bg-card"><DialogHeader><div className="mb-3 grid size-12 place-items-center rounded-md bg-destructive/15 text-destructive"><AlertTriangle /></div><DialogTitle className="font-display text-2xl">Emergency communication</DialogTitle><DialogDescription>This speaks the message aloud. It does not contact emergency services.</DialogDescription></DialogHeader><p className="my-5 border-y border-border py-6 font-display text-3xl font-semibold">“I NEED IMMEDIATE HELP”</p><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={onSpeak}><Volume2 /> Speak message</Button></DialogFooter></DialogContent></Dialog>; }
+
+export function CommunicationHistory({ entries }: { entries: CommunicationEntry[] }) { return <section className="panel p-5"><SectionLabel>Recent communication</SectionLabel><div className="mt-4 divide-y divide-border">{entries.length ? entries.map((entry) => <div key={entry.id} className="flex gap-5 py-4"><time className="font-mono text-xs text-primary">{entry.time}</time><p className="font-medium">“{entry.message}”</p></div>) : <div className="py-8 text-sm text-muted-foreground">No messages yet. Spoken and quick-action messages will appear here.</div>}</div></section>; }
