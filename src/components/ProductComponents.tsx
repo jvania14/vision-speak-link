@@ -28,7 +28,7 @@ export function CameraFeed({ online }: { online: boolean }) {
   );
 }
 
-export function RecognitionCard({ recognizedCharacter, confidence, status }: { recognizedCharacter: string; confidence?: number; status: string }) {
+export function RecognitionCard({ recognizedCharacter, confidence, status }: { recognizedCharacter: string; confidence: number | undefined; status: string }) {
   return <section className="panel flex h-full flex-col p-6"><div className="flex items-center justify-between"><SectionLabel>Live recognition</SectionLabel><Waves className="size-5 text-primary" /></div><div className="grid flex-1 place-items-center py-8 text-center"><div><motion.div animate={recognizedCharacter ? { scale: [1, 1.04, 1] } : {}} className="mx-auto grid size-40 place-items-center rounded-full border border-primary/30 bg-primary/8 font-display text-7xl font-semibold text-primary shadow-glow">{recognizedCharacter || "—"}</motion.div><p className="mt-6 text-sm font-medium text-muted-foreground">{status}</p></div></div><div className="border-t border-border pt-5"><div className="flex justify-between text-sm"><span className="text-muted-foreground">Confidence</span><span className="font-mono text-foreground">{confidence === undefined ? "Awaiting data" : `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%`}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><motion.div className="h-full bg-primary" animate={{ width: confidence === undefined ? "0%" : `${confidence <= 1 ? confidence * 100 : confidence}%` }} /></div></div></section>;
 }
 
