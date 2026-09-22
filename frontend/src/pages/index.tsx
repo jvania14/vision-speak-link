@@ -1,20 +1,15 @@
 import { Link } from "@nextui-org/link";
-import { Code } from "@nextui-org/code";
 import { button as buttonStyles } from "@nextui-org/theme";
-import {Button, ButtonGroup} from "@nextui-org/button";
+import { Button } from "@nextui-org/button";
 import {Image} from "@nextui-org/image";
-import { siteConfig } from "@/config/site";
 import { title, subtitle } from "@/components/primitives";
-import { GithubIcon } from "@/components/icons";
 import DefaultLayout from "@/layouts/default";
-import {Divider} from "@nextui-org/divider";
 import {Switch} from "@nextui-org/switch";
-import {Card, CardHeader, CardBody, CardFooter} from "@nextui-org/card";
+import {Card, CardBody, CardFooter} from "@nextui-org/card";
 import LightbulbAnimation from "@/components/controls/lightbulb";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import FanAnimation from "@/components/controls/fan";
 import LockAnimation from "@/components/controls/lock";
-import {Snippet} from "@nextui-org/snippet";
 import CommandDisplay from "@/components/command-display";
 export default function IndexPage() {
 
@@ -22,6 +17,18 @@ export default function IndexPage() {
   const [isFanOn, setIsFanOn] = useState(false);
   const [isLockOn, setIsLockOn] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+  const demoVideoRef = useRef<HTMLVideoElement>(null);
+
+  const closeDemo = () => {
+    const video = demoVideoRef.current;
+    if (video) {
+      video.pause();
+      video.currentTime = 0;
+    }
+    setIsDemoOpen(false);
+  };
+
   return (
     <DefaultLayout>
       <section className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
@@ -49,14 +56,13 @@ export default function IndexPage() {
           >
             Try Now!
           </Link>
-          <Link
-            isExternal
+          <Button
             className={buttonStyles({ variant: "bordered", radius: "full" })}
-            href={siteConfig.links.github}
+            onClick={() => setIsDemoOpen(true)}
+            startContent={<span aria-hidden="true">▶</span>}
           >
-            <GithubIcon size={20} />
-            GitHub
-          </Link>
+            Watch Demo
+          </Button>
         </div>
       
       </section>
@@ -136,6 +142,37 @@ export default function IndexPage() {
 
           </div>
       </section >
+
+      {isDemoOpen && (
+        <div
+          aria-label="Silent Talk demo video"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md sm:p-8"
+          role="dialog"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeDemo();
+          }}
+        >
+          <div className="relative w-full max-w-6xl rounded-3xl border border-cyan-300/30 bg-slate-950/90 p-2 shadow-[0_0_80px_rgba(0,217,255,.22)] sm:p-4">
+            <div className="mb-3 flex items-center justify-between px-2 pt-1 sm:px-3">
+              <div>
+                <p className="font-mono text-[.65rem] uppercase tracking-[.2em] text-cyan-300">Silent Talk / Product Demo</p>
+                <p className="mt-1 text-sm text-slate-300">Communication without barriers.</p>
+              </div>
+              <Button isIconOnly aria-label="Close demo" className="bg-white/10 text-white" onPress={closeDemo}>×</Button>
+            </div>
+            <video
+              ref={demoVideoRef}
+              autoPlay
+              className="max-h-[78vh] w-full rounded-2xl bg-black object-contain"
+              controls
+              preload="metadata"
+              playsInline
+              src="/videos/silent-talk-demo.mp4"
+            />
+          </div>
+        </div>
+      )}
 
 
       <section className="mt-44">

@@ -1,7 +1,5 @@
-import axios from 'axios';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
-import { fetchTranslatedText as fetchFromApi, setStableTime } from '../services/apiService';
 import { Snippet } from '@nextui-org/snippet';
 import { Button } from '@nextui-org/button';
 

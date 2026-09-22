@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import lottie from "lottie-web";
 import animationData from "./lightBulb.json"; // Update with your actual path
 

@@ -94,14 +94,34 @@ def open_camera():
         return None
     return camera
 
+
 def detect_asl(queue, cap):
     global final_text, current_letter, current_confidence, hand_detected, last_prediction, last_prediction_time, gesture_armed, stable_time_required, fill_color_start_time
+    frame_queue = Queue(maxsize=1)
+    stop_reader = threading.Event()
+
+    def read_frames():
+        while not stop_reader.is_set():
+            ret, frame = cap.read()
+            if not ret:
+                try:
+                    frame_queue.put_nowait(None)
+                except:
+                    pass
+                return
+
+    reader = threading.Thread(target=read_frames, daemon=True)
+    reader.start()
     print("VIDEO FEED CLIENT CONNECTED")
 
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
+            try:
+                frame = frame_queue.get(timeout=5)
+            except Empty:
+                print("FRAME READ TIMEOUT")
+                break
+            if frame is None:
                 print("FRAME READ FAILED")
                 break
 
@@ -184,6 +204,7 @@ def detect_asl(queue, cap):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
     finally:
+        stop_reader.set()
         cap.release()
 
 queue = Queue()
