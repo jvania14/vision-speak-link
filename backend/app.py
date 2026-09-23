@@ -1,120 +1,432 @@
-from flask import Flask, jsonify, request, Response
+import math
+import os
+import pickle
+import threading
+import uuid
+from datetime import datetime, timedelta
 import cv2
 import mediapipe as mp
 import numpy as np
-import pickle
-import threading
-from datetime import datetime
-from queue import Empty, Queue
-from openai import OpenAI
-import os
 from dotenv import load_dotenv
-from flask import Flask, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+from openai import OpenAI
+
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_FRAME_BYTES", str(3 * 1024 * 1024)))
 
-model_dict = pickle.load(open('model.p', 'rb'))
-model = model_dict['model']
+# Dynamic CORS configuration for deployment and local development
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*")
+if FRONTEND_ORIGIN == "*":
+    CORS(app)
+else:
+    origins = [o.strip() for o in FRONTEND_ORIGIN.split(",") if o.strip()]
+    CORS(app, origins=origins, supports_credentials=True)
+
+# Load existing trained model (DO NOT MODIFY MODEL.P)
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "model.p") if os.path.dirname(__file__) else "model.p"
+model_dict = pickle.load(open(MODEL_PATH, "rb"))
+model = model_dict["model"]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
+SYSTEM_MESSAGE = {
+    "role": "system",
+    "content": (
+        "\nStick strictly to theese guidelines:\n\nYou are an assistant for a live translator of "
+        "fingerspelling sign language. Your task is to analyze the input of fingerspelled sequences "
+        "and identify if there are words that are stuck together. If so, you should insert spaces to "
+        "separate these words appropriately. Otherwise, return the input as it is.\n\n"
+        "Key instructions:\n0. Altering: Do NOT add letters, do NOT delete letters.\n"
+        "1. Insert spaces where necessary without altering meaning.\n"
+    ),
+}
 
-messages = [
-    {
-        "role": "system",
-        "content": "\nStick strictly to theese guidelines:\n\nYou are an assistant for a live translator of fingerspelling sign language. Your task is to analyze the input of fingerspelled sequences and identify if there are words that are stuck together. If so, you should insert spaces to separate these words appropriately. Otherwise, return the input as it is.\n\nKey instructions:\n\n0. **Altering**: \n   - Do NOT add letters to the sequence, and do NOT delete any letters from the sequence. \n\n1. **Contextual Analysis**: \n   - Analyze the context of the fingerspelled sequence to determine if it forms a known word, phrase, or expression. \n\n2. **Maintaining Integrity**: \n   - If the input clearly forms a known word, phrase, or idiomatic expression, keep it intact. Your sole task is to insert spaces where necessary without altering the meaning.\n\n3. **Idiomatic and Informal Language**: \n   - Be aware of idiomatic and informal language, such as \"u\" for \"you,\" and recognize such contexts to maintain the intended meaning.\n\n4. **Common Phrases and Expressions**: \n   - Recognize and keep together common idiomatic expressions and phrases, especially well-known sayings.\n\n5. **Separation Guidelines**: \n   - Only separate fragments that clearly do not belong together based on their meaning or context. Ensure that fragments not corresponding to valid English words or common phrases are appropriately divided.\n\n6. **Single Words and Expressions**: \n   - Prioritize keeping single, easily recognizable words intact unless they form part of a larger multi-word expression.\n\n7. **Comprehensive Review**: \n   - Always review the entire sequence of fingerspelled letters to assess if they combine to form recognized words, phrases, idiomatic expressions, or well-known sayings in English.\n\n8. **Avoid Isolated Symbols**: \n   - Avoid leaving any single symbol or sequence of symbols with spaces before and after if they make no sense. Attempt to form meaningful words or prepositions using nearby symbols unless they have idiomatic meaning in context.\n\n**Examples**:\n\n- \"loveusomu ch\" should be recognized and corrected to \"love u so much.\"\n- \"lovey ou\" should be recognized and corrected to \"love you.\"\n\n**List of Common Idiomatic Expressions and Phrases**:\n- \"break a leg\"\n- \"hit the sack\"\n- \"let the cat out of the bag\"\n- \"piece of cake\"\n- \"once in a blue moon\"\n- \"cost an arm and a leg\"\n- \"a blessing in disguise\"\n- \"a dime a dozen\"\n- \"beat around the bush\"\n- \"bite the bullet\"\n- \"call it a day\"\n- \"cut somebody some slack\"\n- \"hang in there\"\n- \"it's not rocket science\"\n- \"make a long story short\"\n- \"miss the boat\"\n- \"no pain, no gain\"\n- \"pull someone's leg\"\n- \"speak of the devil\"\n- \"the best of both worlds\"\n- \"time flies\"\n- \"under the weather\"\n- \"your guess is as good as mine\"\n\nEnsure idiomatic expressions and common phrases are kept intact and only divide words or fragments that clearly do not belong together based on meaning or context.\n\nIMPORTANT: NEVER ADD or delete any letters; you can work only with spaces. NEVER ADD ANYTHING EXCEPT SPACES!!! If input can not form a recognized word, phrase, or expression, just return it back.",
-    }
-]
 
-def send_message(message):
+def send_message(message: str) -> str:
     if client is None:
         return message
+    try:
+        chat = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[SYSTEM_MESSAGE, {"role": "user", "content": message}],
+        )
+        reply = chat.choices[0].message.content or message
+        return reply
+    except Exception as err:
+        print(f"OpenAI error: {err}")
+        return message
 
-    messages.append({"role": "user", "content": message})
-    chat = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
-    reply = chat.choices[0].message.content
-    print(f"Translation: {reply}")
-    messages.append({"role": "assistant", "content": reply})
-    return reply
-
-def api_request_thread(queue):
-    while True:
-        final_text = queue.get()
-        if final_text is None:
-            break
-        final_text = send_message(final_text)  
-        print(f"Updated final_text: {final_text}")
-        update_final_text(final_text);
-
+# MediaPipe Hands: static frames from /predict (same min_detection_confidence as original).
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 
-hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.3)
+# Independent JPEG frames from each visitor: static_image_mode matches the
+# original still-frame pipeline. Do not change landmark feature extraction.
+hands = mp_hands.Hands(
+    static_image_mode=True,
+    max_num_hands=1,
+    min_detection_confidence=0.3,
+)
+hands_lock = threading.Lock()
 
-labels_dict = {i: chr(97 + i) for i in range(26)}
+# Existing model.p classes are string labels "0".."25" (see model.classes_).
+# Legacy Silent Talk code maps those integers onto A-Z in alphabetic order.
+labels_dict = {i: chr(65 + i) for i in range(26)}
 
-final_text = ""
-current_letter = ""
-current_confidence = None
-hand_detected = False
-last_prediction = ""
-last_prediction_time = None
-gesture_armed = True
-stable_time_required = 1.5
-fill_color_start_time = None
-final_text_lock = threading.Lock()
-
-def update_final_text(new_text):
-    global final_text
-    with final_text_lock:
-        final_text = new_text
-
-color_fill = (174, 90, 6, 200)  # #A8CB1A with 50% alpha
-color_frame = (0, 0, 0)  # #3C424D with 50% alpha
-
-def draw_transparent_rect(frame, x1, y1, x2, y2, color):
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x1, y1), (x2, y2), color[:3], -1)
-    cv2.addWeighted(overlay, color[3] / 255.0, frame, 1 - color[3] / 255.0, 0, frame)
+# Multi-user session storage: thread-safe, isolated per client
+sessions_lock = threading.Lock()
+sessions: dict[str, dict] = {}
+CONFIDENCE_THRESHOLD = float(os.getenv("RECOGNITION_CONFIDENCE_THRESHOLD", "0.30"))
+STABLE_FRAME_COUNT = max(1, int(os.getenv("RECOGNITION_STABLE_FRAMES", "3")))
+LETTER_COOLDOWN_SECONDS = float(os.getenv("RECOGNITION_LETTER_COOLDOWN_SECONDS", "0.8"))
+DEBUG_RECOGNITION = os.getenv("DEBUG_RECOGNITION", "0") == "1"
 
 
+def extract_42_features(hand_landmarks) -> list[float]:
+    """Original pipeline: 21 landmarks, (x-min_x, y-min_y) pairs, length 42."""
+    x_ = [landmark.x for landmark in hand_landmarks.landmark]
+    y_ = [landmark.y for landmark in hand_landmarks.landmark]
+    min_x = min(x_)
+    min_y = min(y_)
+    data_aux: list[float] = []
+    for landmark in hand_landmarks.landmark:
+        data_aux.append(landmark.x - min_x)
+        data_aux.append(landmark.y - min_y)
+    return data_aux
+
+
+def map_model_class(raw_prediction) -> tuple[str, str]:
+    """Return (predicted_class, letter). Never swallow an unknown class as ''."""
+    if hasattr(raw_prediction, "item"):
+        raw_prediction = raw_prediction.item()
+    predicted_class = str(raw_prediction)
+    try:
+        class_index = int(raw_prediction)
+    except (TypeError, ValueError):
+        return predicted_class, f"UNMAPPED:{predicted_class}"
+    if class_index not in labels_dict:
+        return predicted_class, f"UNMAPPED:{predicted_class}"
+    return predicted_class, labels_dict[class_index]
+
+
+def infer_from_bgr_frame(frame):
+    """Run MediaPipe + existing model.p. Does not mutate model.p."""
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    with hands_lock:
+        results = hands.process(frame_rgb)
+
+    payload = {
+        "hand_detected": False,
+        "landmark_count": 0,
+        "feature_count": 0,
+        "predicted_class": None,
+        "letter": "",
+        "confidence": None,
+        "landmarks": [],
+    }
+
+    if not results.multi_hand_landmarks:
+        if DEBUG_RECOGNITION:
+            print("DEBUG_RECOGNITION hand_detected=False", flush=True)
+        return payload
+
+    hand_landmarks = results.multi_hand_landmarks[0]
+    landmarks_list = [{"x": float(lm.x), "y": float(lm.y)} for lm in hand_landmarks.landmark]
+    data_aux = extract_42_features(hand_landmarks)
+
+    prediction = model.predict([np.asarray(data_aux)])
+    predicted_class, letter = map_model_class(prediction[0])
+    confidence = None
+    if hasattr(model, "predict_proba"):
+        try:
+            probabilities = model.predict_proba([np.asarray(data_aux)])
+            confidence = float(np.max(probabilities[0]))
+        except Exception as err:
+            print(f"DEBUG_RECOGNITION predict_proba failed: {err}")
+            confidence = None
+
+    payload.update(
+        {
+            "hand_detected": True,
+            "landmark_count": len(hand_landmarks.landmark),
+            "feature_count": len(data_aux),
+            "predicted_class": predicted_class,
+            "letter": letter,
+            "confidence": confidence,
+            "landmarks": landmarks_list,
+        }
+    )
+    if DEBUG_RECOGNITION:
+        print(
+            "DEBUG_RECOGNITION",
+            f"hand_detected={payload['hand_detected']}",
+            f"landmark_count={payload['landmark_count']}",
+            f"feature_count={payload['feature_count']}",
+            f"predicted_class={predicted_class}",
+            f"predicted_letter={letter}",
+            f"confidence={confidence}",
+            flush=True,
+        )
+    return payload
+
+
+def read_request_frame_bytes():
+    if "frame" in request.files:
+        return request.files["frame"].read()
+    if request.is_json and request.json and "image" in request.json:
+        import base64
+        img_str = request.json["image"]
+        if "," in img_str:
+            img_str = img_str.split(",", 1)[1]
+        return base64.b64decode(img_str)
+    if request.data:
+        return request.data
+    return None
+
+
+def get_or_create_session(session_id: str | None = None) -> tuple[str, dict]:
+    global sessions
+    with sessions_lock:
+        now = datetime.now()
+        # Clean up stale sessions older than 2 hours to avoid memory leaks
+        stale_threshold = now - timedelta(hours=2)
+        stale_keys = [sid for sid, s in sessions.items() if s.get("last_seen", now) < stale_threshold]
+        for sid in stale_keys:
+            del sessions[sid]
+
+        if not session_id or session_id not in sessions:
+            new_id = session_id if session_id else uuid.uuid4().hex
+            sessions[new_id] = {
+                "final_text": "",
+                "current_letter": "",
+                "current_confidence": None,
+                "hand_detected": False,
+                "last_prediction": "",
+                "last_prediction_time": None,
+                "stable_prediction": "",
+                "stable_count": 0,
+                "last_committed_letter": "",
+                "last_committed_time": None,
+                "gesture_armed": True,
+                "landmarks": [],
+                "last_seen": now,
+            }
+            return new_id, sessions[new_id]
+
+        sessions[session_id]["last_seen"] = now
+        return session_id, sessions[session_id]
+
+
+# ---------------------------------------------------------------------------
+# PUBLIC MULTI-USER ENDPOINT: /predict
+# Receives a compressed frame from any user's browser webcam.
+# Runs MediaPipe, extracts the SAME 42 features, runs existing model.p,
+# and returns isolated prediction + 21 hand landmarks for HUD overlay.
+# ---------------------------------------------------------------------------
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify(
+        status="ok",
+        model_loaded=True,
+        model_type=type(model).__name__,
+        n_features_in=getattr(model, "n_features_in_", None),
+        classes=[str(value) for value in getattr(model, "classes_", [])],
+        static_gesture_support="A-Z single-frame labels inherited from existing model.p",
+    )
+
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    session_id = (
+        request.form.get("session_id")
+        or request.headers.get("X-Session-Id")
+        or (request.json.get("session_id") if request.is_json else None)
+    )
+    sid, session = get_or_create_session(session_id)
+
+    frame_bytes = read_request_frame_bytes()
+    if not frame_bytes:
+        return jsonify(error="No frame data received"), 400
+
+    np_buf = np.frombuffer(frame_bytes, np.uint8)
+    frame = cv2.imdecode(np_buf, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify(error="Could not decode image"), 400
+
+    result = infer_from_bgr_frame(frame)
+    hand_detected = result["hand_detected"]
+    predicted_character = result["letter"]
+    confidence = result["confidence"]
+
+    with sessions_lock:
+        session["hand_detected"] = hand_detected
+        session["landmarks"] = result["landmarks"]
+        session["current_letter"] = predicted_character
+        session["current_confidence"] = confidence
+        confidence_ok = confidence is None or (
+            isinstance(confidence, (int, float))
+            and math.isfinite(confidence)
+            and confidence >= CONFIDENCE_THRESHOLD
+        )
+        valid_letter = (
+            hand_detected
+            and confidence_ok
+            and predicted_character
+            and not str(predicted_character).startswith("UNMAPPED")
+        )
+        if valid_letter:
+            now = datetime.now()
+            if predicted_character == session["stable_prediction"]:
+                session["stable_count"] += 1
+            else:
+                session["stable_prediction"] = predicted_character
+                session["stable_count"] = 1
+                session["last_prediction_time"] = now
+
+            cooldown_elapsed = (
+                session["last_committed_time"] is None
+                or (now - session["last_committed_time"]).total_seconds() >= LETTER_COOLDOWN_SECONDS
+            )
+            duplicate_rearmed = (
+                predicted_character != session["last_committed_letter"] or session["gesture_armed"]
+            )
+            if session["stable_count"] >= STABLE_FRAME_COUNT and cooldown_elapsed and duplicate_rearmed:
+                session["final_text"] += predicted_character
+                session["last_prediction"] = predicted_character
+                session["last_committed_letter"] = predicted_character
+                session["last_committed_time"] = now
+                session["gesture_armed"] = False
+        else:
+            session["last_prediction"] = ""
+            session["last_prediction_time"] = None
+            session["stable_prediction"] = ""
+            session["stable_count"] = 0
+            session["gesture_armed"] = True
+
+        return jsonify({
+            "text": session["final_text"],
+            "letter": session["current_letter"],
+            "confidence": session["current_confidence"],
+            "hand_detected": session["hand_detected"],
+            "landmarks": session["landmarks"],
+            "session_id": sid,
+            "predicted_class": result["predicted_class"],
+            "landmark_count": result["landmark_count"],
+            "feature_count": result["feature_count"],
+        })
+
+
+@app.route("/predict-debug", methods=["POST"])
+def predict_debug():
+    frame_bytes = read_request_frame_bytes()
+    if not frame_bytes:
+        return jsonify(error="No frame data received"), 400
+    np_buf = np.frombuffer(frame_bytes, np.uint8)
+    frame = cv2.imdecode(np_buf, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify(error="Could not decode image"), 400
+    result = infer_from_bgr_frame(frame)
+    return jsonify(
+        {
+            "hand_detected": result["hand_detected"],
+            "landmark_count": result["landmark_count"],
+            "feature_count": result["feature_count"],
+            "predicted_class": result["predicted_class"],
+            "letter": result["letter"],
+            "confidence": result["confidence"],
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# SESSION-ISOLATED TEXT & BUFFER CONTROL
+# ---------------------------------------------------------------------------
+@app.route("/get_text", methods=["GET"])
+def get_text():
+    session_id = request.args.get("session_id") or request.headers.get("X-Session-Id")
+    with sessions_lock:
+        if session_id and session_id in sessions:
+            s = sessions[session_id]
+            return jsonify(
+                text=s["final_text"],
+                letter=s["current_letter"],
+                confidence=s["current_confidence"],
+                hand_detected=s["hand_detected"],
+                landmarks=s["landmarks"],
+                session_id=session_id,
+            )
+        return jsonify(
+            text="",
+            letter="",
+            confidence=None,
+            hand_detected=False,
+            landmarks=[],
+            session_id=session_id or "",
+        )
+
+
+@app.route("/reset_text", methods=["POST"])
+def reset_text():
+    session_id = (
+        request.form.get("session_id")
+        or request.headers.get("X-Session-Id")
+        or (request.json.get("session_id") if request.is_json else None)
+        or request.args.get("session_id")
+    )
+    with sessions_lock:
+        if session_id and session_id in sessions:
+            session = sessions[session_id]
+            session["final_text"] = ""
+            session["current_letter"] = ""
+            session["current_confidence"] = None
+            session["hand_detected"] = False
+            session["last_prediction"] = ""
+            session["last_prediction_time"] = None
+            session["stable_prediction"] = ""
+            session["stable_count"] = 0
+            session["last_committed_letter"] = ""
+            session["last_committed_time"] = None
+            session["gesture_armed"] = True
+            session["landmarks"] = []
+    return jsonify(success=True, session_id=session_id or "")
+
+
+# ---------------------------------------------------------------------------
+# LEGACY SERVER-CAMERA STREAM (LOCAL FALLBACK)
+# ---------------------------------------------------------------------------
 CAMERA_INDEX = 1
+FALLBACK_CAMERA_INDICES = (0, 2, 3)
 
 
 def open_camera():
-    print(f"Opening camera index {CAMERA_INDEX}...")
-    camera = cv2.VideoCapture(CAMERA_INDEX)
-    print(f"Camera opened: {camera.isOpened()}")
-    if not camera.isOpened():
-        camera.release()
-        return None
-    return camera
+    indices = [CAMERA_INDEX] + [i for i in FALLBACK_CAMERA_INDICES if i != CAMERA_INDEX]
+    for index in indices:
+        try:
+            camera = cv2.VideoCapture(index)
+            if camera.isOpened():
+                return camera, index
+            camera.release()
+        except Exception:
+            continue
+    return None, None
 
-def detect_asl(queue, cap):
-    global final_text, current_letter, current_confidence, hand_detected, last_prediction, last_prediction_time, gesture_armed, stable_time_required, fill_color_start_time
-    print("VIDEO FEED CLIENT CONNECTED")
 
+def detect_asl(cap):
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("FRAME READ FAILED")
                 break
-
-            data_aux = []
-            x_ = []
-            y_ = []
-
-            H, W, _ = frame.shape
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = hands.process(frame_rgb)
-
+            results = None
+            with hands_lock:
+                results = hands.process(frame_rgb)
             if results.multi_hand_landmarks:
-                hand_detected = True
                 for hand_landmarks in results.multi_hand_landmarks:
                     mp_drawing.draw_landmarks(
                         frame,
@@ -123,101 +435,23 @@ def detect_asl(queue, cap):
                         mp_drawing_styles.get_default_hand_landmarks_style(),
                         mp_drawing_styles.get_default_hand_connections_style()
                     )
-
-                    x_ = []
-                    y_ = []
-                    for landmark in hand_landmarks.landmark:
-                        x_.append(landmark.x)
-                        y_.append(landmark.y)
-
-                    data_aux = []
-                    for i in range(len(hand_landmarks.landmark)):
-                        x = hand_landmarks.landmark[i].x
-                        y = hand_landmarks.landmark[i].y
-                        data_aux.append(x - min(x_))
-                        data_aux.append(y - min(y_))
-
-                    prediction = model.predict([np.asarray(data_aux)])
-                    probabilities = model.predict_proba([np.asarray(data_aux)])
-                    print(f"feature_count: {len(data_aux)}")
-                    print(f"raw_prediction: {prediction[0]}")
-                    print(f"top_probability: {probabilities[0].max()}")
-                    predicted_character = labels_dict[int(prediction[0])]
-                    current_letter = predicted_character
-                    current_confidence = float(probabilities[0].max())
-
-                    if predicted_character == last_prediction:
-                        if gesture_armed and (datetime.now() - last_prediction_time).total_seconds() >= stable_time_required:
-                            with final_text_lock:
-                                final_text += predicted_character
-                            print(f"Letter '{predicted_character}' detected. You can show the next letter.")
-                            queue.put(final_text)
-                            gesture_armed = False
-                            fill_color_start_time = datetime.now()
-                    else:
-                        last_prediction = predicted_character
-                        last_prediction_time = datetime.now()
-                    x1 = int(min(x_) * W) - 10
-                    y1 = int(min(y_) * H) - 10
-                    x2 = int(max(x_) * W) - 10
-                    y2 = int(max(y_) * H) - 10
-
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color_frame, 2)
-                    cv2.putText(frame, predicted_character, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.3, color_frame, 3, cv2.LINE_AA)
-
-            else:
-                hand_detected = False
-                current_letter = ""
-                current_confidence = None
-                last_prediction = ""
-                last_prediction_time = None
-                gesture_armed = True
-
-            if hand_detected and fill_color_start_time and (datetime.now() - fill_color_start_time).total_seconds() <= 0.3:
-                draw_transparent_rect(frame, x1, y1, x2, y2, color_fill)
-            ret, buffer = cv2.imencode('.jpg', frame)
+            ret, buffer = cv2.imencode(".jpg", frame)
             if not ret:
-                print("JPEG ENCODE FAILED")
                 continue
-            frame = buffer.tobytes()
-
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            frame_bytes = buffer.tobytes()
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
     finally:
         cap.release()
 
-queue = Queue()
-t = threading.Thread(target=api_request_thread, args=(queue,))
-t.start()
 
-@app.route('/video_feed')
+@app.route("/video_feed")
 def video_feed():
-    camera = open_camera()
+    camera, _camera_index = open_camera()
     if camera is None:
-        return jsonify(error=f"Could not open camera index {CAMERA_INDEX}"), 503
-    return Response(detect_asl(queue, camera), mimetype='multipart/x-mixed-replace; boundary=frame')
+        return jsonify(error="Server camera unavailable. Use browser webcam via /predict."), 503
+    return Response(detect_asl(camera), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route('/get_text')
-def get_text():
-    global final_text
-    with final_text_lock:
-        return jsonify(text=final_text, letter=current_letter, confidence=current_confidence, hand_detected=hand_detected)
-
-@app.route('/reset_text', methods=['POST'])
-def reset_text():
-    global final_text, current_letter, current_confidence, hand_detected, last_prediction, last_prediction_time, gesture_armed
-    final_text = ""
-    current_letter = ""
-    current_confidence = None
-    hand_detected = False
-    last_prediction = ""
-    last_prediction_time = None
-    gesture_armed = True
-    update_final_text("");
-    print("I am working")
-    with final_text_lock:
-        final_text = ""
-    return jsonify(success=True)
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

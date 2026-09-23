@@ -4,7 +4,7 @@ entrypoint: gunicorn -b :$PORT app:app
 instance_class: F2
 
 env_variables:
-  OPENAI_API_KEY: "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"
+  FRONTEND_ORIGIN: "*"
 
 handlers:
 - url: /static
