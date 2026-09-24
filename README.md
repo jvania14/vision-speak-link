@@ -1,12 +1,10 @@
 <a name="readme-top"></a>
 
 <div align="center">
-  <img src="frontend/public/logo.svg" alt="Silent Talk Logo" width="120" height="120" />
-  
   <h3 align="center">Silent Talk</h3>
 
   <p align="center">
-    ASL Fingerspelling Recognition Prototype
+    AI-powered ASL fingerspelling recognition for healthcare communication
   </p>
 
   <p align="center">
@@ -18,141 +16,253 @@
   <p align="center">
     <img src="https://img.shields.io/badge/Award-Samsung_Solve_for_Tomorrow_Top_30-blue?style=for-the-badge&logo=samsung&logoColor=white" alt="Samsung Award" />
     <br />
- <a href="https://github.com/alexandr-tk/silent-talk/graphs/contributors">
-      <img src="https://img.shields.io/github/contributors/alexandr-tk/silent-talk?style=for-the-badge" alt="Contributors" />
-    </a>
     <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/alexandr-tk/silent-talk?style=for-the-badge" alt="License" />
+      <img src="https://img.shields.io/github/license/jvania14/vision-speak-link?style=for-the-badge" alt="License" />
     </a>
-    <a href="https://linkedin.com/in/alexandr-tkachyov">
-      <img src="https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555" alt="LinkedIn" />
-    </a>
-
   </p>
 </div>
 
-<details>
-  <summary>Table of Contents</summary>
-  <ol>
-    <li>
-      <a href="#about-the-project">About The Project</a>
-      <ul>
-        <li><a href="#built-with">Built With</a></li>
-      </ul>
-    </li>
-    <li><a href="#system-architecture">System Architecture</a></li>
-    <li>
-      <a href="#getting-started">Getting Started</a>
-      <ul>
-        <li><a href="#prerequisites">Prerequisites</a></li>
-        <li><a href="#installation">Installation</a></li>
-      </ul>
-    </li>
-    <li><a href="#status--limitations">Status & Limitations</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-  </ol>
-</details>
+## Table of Contents
+
+- [About The Project](#about-the-project)
+- [Which app is this?](#which-app-is-this)
+- [Architecture](#architecture)
+- [ASL Recognition Pipeline](#asl-recognition-pipeline)
+- [Tech Stack](#tech-stack)
+- [Environment Variables](#environment-variables)
+- [Local Development](#local-development)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Known Limitations](#known-limitations)
+- [License](#license)
 
 ## About The Project
 
-**Silent Talk** is a webcam prototype that classifies ASL fingerspelled letters and displays the accumulated text. It recognizes hand poses from individual frames; it does not translate continuous sign language or provide two-way interpretation.
+**Silent Talk** helps Deaf and speech-impaired patients communicate with healthcare
+providers by recognizing ASL fingerspelling from a live browser webcam feed and turning
+it into text (and speech) in real time. It recognizes individual fingerspelled letters
+from single hand poses; it does not translate continuous/fluent sign language.
 
-This project was selected as a **Top 30 Semifinalist** (out of 300+ teams) in the **Samsung Solve for Tomorrow 2024** competition.
-
-* **Reported training data:** A custom dataset of **~50,000 images**.
-* **Reported competition result:** **>90% accuracy** on validation samples during competition trials. Training scripts, the validation split, and evaluation results are not included here, so this figure cannot be reproduced from the repository alone.
-* **Execution:** Hand tracking and letter classification run locally without requiring a GPU. Text spacing uses an external OpenAI API call.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-### Built With
-
-* [![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-* [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
-* [![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)](https://opencv.org/)
-* [![MediaPipe](https://img.shields.io/badge/MediaPipe-00BACC?style=for-the-badge&logo=google&logoColor=white)](https://developers.google.com/mediapipe)
-* [![Scikit-Learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
+This project was originally built as a **Top 30 Semifinalist** (out of 300+ teams) entry
+in the **Samsung Solve for Tomorrow 2024** competition, and has since been rebuilt into a
+Patient Mode / Doctor Mode / Accessibility healthcare communication workspace.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## System Architecture
+## Which app is this?
 
-The prototype has a Flask backend and a React frontend.
+This repository contains **three** frontend efforts from its history. Only one is live:
 
-### 1. Vision Engine (Backend)
-Located in `backend/`, the recognition flow is:
-* **Hand Tracking:** MediaPipe extracts skeletal landmarks (21 points per hand) in real-time.
-* **Letter classification:** A saved classifier predicts one of 26 letter labels from hand landmarks. A prediction must remain stable for 1.5 seconds before it is appended.
-* **Text spacing:** The backend sends accumulated text to `gpt-4o-mini` with instructions to insert spaces. There is no speech-synthesis implementation in this snapshot.
+| Path | Status | What it is |
+|---|---|---|
+| `src/` (this repo's root) | ✅ **Canonical, actively developed** | TanStack Start app — Home, Patient Mode, Doctor Mode, How It Works, Accessibility. This is the app the deployment configuration below targets. |
+| `frontend/` | ⚠️ Legacy, unused | An earlier, unrelated Vite/React "smart home" hackathon prototype (NextUI + react-router). Not imported by anything live, not part of any deploy. Kept for reference only — **do not point a deployment at this directory.** |
+| `backend/vision-speak-link/` | ❌ Removed | Was a broken/dangling git submodule reference with no `.gitmodules` entry (pointed at an empty, unresolvable commit). Untracked as part of repo cleanup. |
 
-### 2. User Interface (Frontend)
-Located in `/frontend`, the client is built with **React**:
-* **Display:** Shows the backend camera feed and polls recognized text once per second.
-* **Controls:** Includes camera-display and text-reset controls, plus a light/dark theme.
+The Flask backend (`backend/`) is shared by all of the above, but only `src/` actually
+talks to it correctly (see below).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Getting Started
+## Architecture
 
-The original setup targets **Python 3.9+** and **Node.js**. The backend needs access to the host computer’s camera, the bundled `backend/model.p`, and an `OPENAI_API_KEY` environment variable. Starting it without an API key fails when the OpenAI client is created.
+```
+Browser (src/ — TanStack Start)          Flask backend (backend/app.py)
+┌─────────────────────────────┐          ┌───────────────────────────────┐
+│ useRecognition hook          │  frame   │ POST /predict                 │
+│  - getUserMedia(video)       │ ───────► │  - decode image (cv2)         │
+│  - <canvas> grabs a frame    │  every   │  - MediaPipe Hands (21 pts)   │
+│    every ~300ms, JPEG/base64 │  ~300ms  │  - 42-feature vector          │
+│  - session_id (per tab)      │          │  - model.p (RandomForest)     │
+│                               │ ◄─────── │  - per-session stable-letter  │
+│  - hand_detected / letter /   │  JSON    │    buffering + cooldown       │
+│    confidence / text          │          └───────────────────────────────┘
+└─────────────────────────────┘
+```
+
+Each browser tab generates its own `session_id` (`crypto.randomUUID()`), so multiple
+patients/devices can use the same backend deployment concurrently without mixing up
+recognized text.
+
+The backend also exposes legacy endpoints (`/video_feed`, `/get_text`, `/reset_text`)
+that stream from a **physical camera attached to the server itself**. These only work for
+local development on a machine with a webcam plugged into it, and intentionally return
+`503` in any real deployment (no server has a webcam) — real recognition always goes
+through the browser-webcam-based `/predict` flow described above.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## ASL Recognition Pipeline
+
+1. **Capture** — `useRecognition` (`src/hooks/useRecognition.ts`) requests
+   `getUserMedia`, binds the stream to a `<video>` element, and grabs a frame onto a
+   hidden `<canvas>` every ~300ms as a JPEG data URL.
+2. **Predict** — the frame + `session_id` are POSTed to `/predict`
+   (`src/services/api.ts` → `backend/app.py`).
+3. **Detect** — the backend decodes the image, converts BGR→RGB, and runs
+   MediaPipe Hands (`static_image_mode=True, max_num_hands=1,
+   min_detection_confidence=0.3`) to get 21 hand landmarks.
+4. **Classify** — landmarks are turned into the same 42-value feature vector used at
+   training time (`extract_42_features` in `app.py`, matching `train_model.py`), which is
+   fed into the existing `model.p` (`RandomForestClassifier`) to get a letter + confidence.
+5. **Stabilize** — a letter is only appended to the session's text buffer once it has
+   repeated for `RECOGNITION_STABLE_FRAMES` consecutive frames above
+   `RECOGNITION_CONFIDENCE_THRESHOLD`, with a `RECOGNITION_LETTER_COOLDOWN_SECONDS` cooldown
+   before the same letter can commit twice in a row (prevents one held pose from spamming
+   the same letter).
+6. **Display / speak** — the frontend renders `hand_detected`, the live predicted letter +
+   confidence, and the accumulated text, and can speak the composed message aloud.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Tech Stack
+
+**Frontend** (`src/`): React 19, TanStack Start/Router, Vite, Tailwind CSS 4, deployed via
+the Nitro `cloudflare-module` preset (Cloudflare Workers/Pages).
+
+**Backend** (`backend/`): Flask 3, Flask-CORS, MediaPipe, OpenCV, scikit-learn
+(RandomForestClassifier), gunicorn, optional OpenAI (`gpt-4o-mini`) for word-spacing
+cleanup of fingerspelled sequences.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Environment Variables
+
+**Frontend** — copy `.env.example` to `.env`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_API_BASE_URL` | `http://127.0.0.1:5000` | Base URL of the Flask backend. |
+
+**Backend** — copy `backend/.env.example` to `backend/.env`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FRONTEND_ORIGIN` | `*` (see `backend/.env.example`) | Comma-separated allowed CORS origin(s). Use a real origin in production. |
+| `OPENAI_API_KEY` | unset | Optional. Recognition works without it; only word-spacing cleanup is skipped. |
+| `MAX_FRAME_BYTES` | `3145728` (3MB) | Max accepted request body size. |
+| `RECOGNITION_CONFIDENCE_THRESHOLD` | `0.30` | Minimum model confidence to accept a predicted letter. |
+| `RECOGNITION_STABLE_FRAMES` | `3` | Consecutive matching frames required before committing a letter. |
+| `RECOGNITION_LETTER_COOLDOWN_SECONDS` | `0.8` | Cooldown before the same letter can commit again. |
+| `DEBUG_RECOGNITION` | `0` | Set to `1` to log per-frame detection/prediction to the server console. |
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Local Development
 
 ### Prerequisites
 
 * Python 3.9+
-* Node.js & npm
+* Node.js & npm (or bun)
 
-### Installation
+### Backend
 
-1. **Clone the repository**
 ```bash
-git clone https://github.com/alexandr-tk/silent-talk.git
-```
-
-2. **Setup Backend (Python)**
-```bash
-cd silent-talk/backend
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+cd backend
+python3 -m venv venv
+source venv/bin/activate       # venv\Scripts\activate on Windows
 pip install -r requirements.txt
-export OPENAI_API_KEY="<your-api-key>"  # backend environment only
-python app.py
+cp .env.example .env           # edit as needed
+python3 app.py                 # serves on http://127.0.0.1:5000
 ```
 
+### Frontend
 
-3. **Setup Frontend (React), in a second terminal from the repository root**
 ```bash
-cd frontend
+cp .env.example .env           # edit VITE_API_BASE_URL if the backend runs elsewhere
 npm install
-npm run dev
+npm run dev                    # serves on http://127.0.0.1:8080
 ```
 
-
+Open `http://127.0.0.1:8080/patient` and grant camera permission when prompted.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Status & Limitations
+## Testing
 
-**Status: Competition proof of concept**
+Backend (from `backend/`, with the venv above active):
 
-This codebase represents the **competition snapshot** of Silent Talk submitted for the Samsung Solve for Tomorrow semifinals.
+```bash
+python3 test_all_letters.py      # exercises /predict-debug against sample frames
+python3 debug_recognition.py     # verbose single-frame debug helper
+curl http://127.0.0.1:5000/health
+```
 
-* **Code Quality:** Experimental / Prototype Grade.
-* **Maintenance:** This competition snapshot is not currently maintained.
-* **Integration limits:** The settings client calls `/set_stable_time`, but the Flask backend does not implement that route. Some service helpers use relative URLs while Vite has no API proxy. The camera and main text display use `localhost:5000` directly.
+Frontend:
+
+```bash
+npx tsc --noEmit   # typecheck
+npm run build      # production build
+```
+
+Browser-dependent behavior (camera permission prompts, live webcam frame quality, and
+end-to-end recognition accuracy against a real hand) requires manual verification in an
+actual browser with a webcam — it cannot be exercised in a headless/CI environment.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Deployment
+
+Camera access via `getUserMedia` requires a **secure context** — HTTPS in production, or
+`localhost` for local development. A plain-HTTP production deploy will silently fail to
+request the camera.
+
+**Frontend** (`src/`): builds via `@lovable.dev/vite-tanstack-config`'s Nitro
+`cloudflare-module` preset (`npm run build` → `.output/`), i.e. it's set up to deploy as a
+Cloudflare Worker/Pages site by default. Set `VITE_API_BASE_URL` to your deployed backend's
+URL at build time.
+
+**Backend** (`backend/`): ships with both a `Procfile` (`gunicorn -b :$PORT app:app`, e.g.
+for Heroku-style platforms) and an `app.yaml` (Google App Engine, `runtime: python39`).
+Before deploying:
+- Set `FRONTEND_ORIGIN` in your hosting environment to your real deployed frontend origin
+  (do not leave it as `*` in production).
+- Set `OPENAI_API_KEY` if you want fingerspelling word-spacing cleanup.
+- `model.p` ships in the repo and is loaded at startup — no extra model download step
+  needed.
+
+`frontend/` has its own `vercel.json`; it is **not** part of the deployed app and should
+not be targeted by any deployment.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Troubleshooting
+
+* **"Camera unavailable" / permission prompt never appears** — check you're on
+  `localhost` or HTTPS; browsers block `getUserMedia` on plain HTTP origins other than
+  localhost.
+* **Camera works but stuck on "Searching for hand"** — check `VITE_API_BASE_URL` actually
+  points at a reachable backend, and check the backend logs (`DEBUG_RECOGNITION=1`) to
+  confirm frames are arriving and MediaPipe is running.
+* **CORS errors in the browser console** — set `FRONTEND_ORIGIN` on the backend to match
+  the frontend's actual origin exactly (scheme + host + port).
+* **`pip install -r requirements.txt` fails to find a mediapipe wheel** — you're likely on
+  an unsupported Python/platform combination for the pinned `mediapipe` version; check
+  [PyPI's mediapipe file list](https://pypi.org/project/mediapipe/#files) for wheels
+  matching your platform.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Known Limitations
+
+* **Model accuracy is imperfect.** Direct verification against the repo's own sample
+  images (`backend/A.jpg`–`D.jpg`) showed correct predictions for 2 of 4 letters, with
+  confidence scores in the 0.43–0.56 range across all four. Hand detection itself works
+  correctly on all four; the classifier (`model.p`, a `RandomForestClassifier`) sometimes
+  confuses visually similar hand shapes. Improving this requires more/better training data
+  (`backend/collect_dataset.py`, `backend/train_model.py`), not a pipeline fix.
+* **No continuous/fluent sign language support** — only discrete fingerspelled letters.
+* **Legacy server-camera endpoints** (`/video_feed`, `/get_text`, `/reset_text` without a
+  session) only work when a webcam is physically attached to the machine running Flask;
+  they are not used by the live frontend and exist only as a local fallback.
+* **`frontend/` is unmaintained legacy code** from an earlier, unrelated prototype — see
+  [Which app is this?](#which-app-is-this).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 
 Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Contact
-
-**Alex Tkachyov** - Lead Developer - [LinkedIn](https://linkedin.com/in/alexandr-tkachyov)
-
-Project Link: [Silent Talk on GitHub](https://github.com/alexandr-tk/silent-talk)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

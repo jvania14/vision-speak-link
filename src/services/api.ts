@@ -1,39 +1,50 @@
 export const API_BASE_URL =
   import.meta.env["VITE_API_BASE_URL"] || "http://127.0.0.1:5000";
 
-export type RecognitionResponse = {
+export type PredictResponse = {
   text: string;
-  character?: string;
-  confidence?: number;
+  letter: string;
+  confidence: number | null;
+  handDetected: boolean;
+  sessionId: string;
 };
 
-export function getVideoFeedUrl() {
-  return `${API_BASE_URL}/video_feed`;
+function parsePredictPayload(payload: unknown, fallbackSessionId: string): PredictResponse {
+  if (!payload || typeof payload !== "object") {
+    return { text: "", letter: "", confidence: null, handDetected: false, sessionId: fallbackSessionId };
+  }
+  const value = payload as Record<string, unknown>;
+  return {
+    text: typeof value["text"] === "string" ? value["text"] : "",
+    letter: typeof value["letter"] === "string" ? value["letter"] : "",
+    confidence: typeof value["confidence"] === "number" ? value["confidence"] : null,
+    handDetected: value["hand_detected"] === true,
+    sessionId: typeof value["session_id"] === "string" && value["session_id"] ? value["session_id"] : fallbackSessionId,
+  };
 }
 
-export async function getRecognizedText(signal?: AbortSignal): Promise<RecognitionResponse> {
-  const response = await fetch(`${API_BASE_URL}/get_text`, signal ? { signal } : {});
+// Captured frames are sent here for real MediaPipe hand detection + model.p prediction.
+// See backend/app.py:243 (/predict) for the full pipeline.
+export async function predictFrame(
+  imageDataUrl: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<PredictResponse> {
+  const response = await fetch(`${API_BASE_URL}/predict`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: imageDataUrl, session_id: sessionId }),
+    ...(signal ? { signal } : {}),
+  });
   if (!response.ok) throw new Error(`Recognition service returned ${response.status}`);
   const payload: unknown = await response.json();
-  if (typeof payload === "string") return { text: payload };
-  if (payload && typeof payload === "object") {
-    const value = payload as Record<string, unknown>;
-    const result: RecognitionResponse = {
-      text: typeof value["text"] === "string" ? value["text"] : "",
-    };
-    const character = typeof value["character"] === "string"
-      ? value["character"]
-      : typeof value["detected_character"] === "string"
-        ? value["detected_character"]
-        : undefined;
-    if (character !== undefined) result.character = character;
-    if (typeof value["confidence"] === "number") result.confidence = value["confidence"];
-    return result;
-  }
-  return { text: "" };
+  return parsePredictPayload(payload, sessionId);
 }
 
-export async function resetRecognizedText(): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/reset_text`, { method: "POST" });
+export async function resetRecognizedText(sessionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/reset_text`, {
+    method: "POST",
+    headers: { "X-Session-Id": sessionId },
+  });
   if (!response.ok) throw new Error(`Reset service returned ${response.status}`);
 }

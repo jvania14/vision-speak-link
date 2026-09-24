@@ -4,6 +4,9 @@ entrypoint: gunicorn -b :$PORT app:app
 instance_class: F2
 
 env_variables:
+  # Set this to your deployed frontend's real origin before deploying to
+  # production (e.g. "https://your-app.pages.dev"). "*" (wildcard CORS) is
+  # only safe for local development.
   FRONTEND_ORIGIN: "*"
 
 handlers:

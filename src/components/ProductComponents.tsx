@@ -1,28 +1,64 @@
 import { motion } from "motion/react";
+import type { RefObject } from "react";
 import { AlertTriangle, Camera, CircleDot, Ear, Hand, MessageSquareText, ScanLine, Volume2, Waves } from "lucide-react";
-import { getVideoFeedUrl } from "@/services/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CommunicationEntry } from "@/context/AppContext";
+import type { CameraStatus, BackendStatus } from "@/hooks/useRecognition";
 
 export function SectionLabel({ children }: { children: React.ReactNode }) { return <p className="eyebrow">{children}</p>; }
 
-export function CameraFeed({ online }: { online: boolean }) {
+export function CameraFeed({
+  videoRef,
+  canvasRef,
+  cameraStatus,
+  cameraError,
+  backendStatus,
+  handDetected,
+  recognizing,
+}: {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  cameraStatus: CameraStatus;
+  cameraError: string | null;
+  backendStatus: BackendStatus;
+  handDetected: boolean;
+  recognizing: boolean;
+}) {
+  const cameraReady = cameraStatus === "available";
+  const backendReady = backendStatus === "connected";
   return (
     <section className="panel overflow-hidden" aria-label="Live camera">
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <div><SectionLabel>Live camera</SectionLabel><p className="mt-1 text-xs text-muted-foreground">Flask video stream</p></div>
-        <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground"><span className={`size-2 rounded-full ${online ? "bg-success" : "bg-warning"}`} />{online ? "CAMERA ACTIVE" : "BACKEND DISCONNECTED"}</span>
+        <div><SectionLabel>Live camera</SectionLabel><p className="mt-1 text-xs text-muted-foreground">Browser webcam → /predict</p></div>
+        <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground"><span className={`size-2 rounded-full ${cameraReady ? "bg-success" : "bg-warning"}`} />{cameraReady ? "CAMERA ACTIVE" : cameraStatus === "requesting" ? "REQUESTING CAMERA" : "CAMERA UNAVAILABLE"}</span>
       </div>
       <div className="relative aspect-video min-h-72 overflow-hidden bg-camera">
-        {online ? <img src={getVideoFeedUrl()} alt="Live camera stream used for ASL gesture recognition" className="size-full object-cover" /> : <div className="absolute inset-0 grid place-items-center px-6 text-center"><div><Camera className="mx-auto size-12 text-primary/70"/><p className="mt-4 font-medium">Waiting for camera stream</p><p className="mt-2 text-sm text-muted-foreground">Start the recognition backend to connect.</p></div></div>}
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className={`size-full object-cover ${cameraReady ? "" : "hidden"}`}
+          aria-label="Live camera stream used for ASL gesture recognition"
+        />
+        <canvas ref={canvasRef} className="hidden" />
+        {!cameraReady && (
+          <div className="absolute inset-0 grid place-items-center px-6 text-center">
+            <div>
+              <Camera className="mx-auto size-12 text-primary/70"/>
+              <p className="mt-4 font-medium">{cameraStatus === "requesting" ? "Requesting camera access…" : "Camera unavailable"}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{cameraError ?? "Grant camera permission to start recognition."}</p>
+            </div>
+          </div>
+        )}
         <div className="scan-line absolute inset-x-0 top-1/2 h-px bg-primary/70 shadow-scan" />
         <div className="absolute left-4 top-4 space-y-2">
-          <div className="overlay-chip"><Hand /> HAND DETECTION <span>{online ? "CONNECTED" : "WAITING"}</span></div>
-          <div className="overlay-chip"><CircleDot /> ASL CLASSIFICATION <span>{online ? "READY" : "WAITING"}</span></div>
+          <div className="overlay-chip"><Hand /> HAND DETECTION <span>{handDetected ? "DETECTED" : cameraReady ? "SEARCHING" : "WAITING"}</span></div>
+          <div className="overlay-chip"><CircleDot /> ASL CLASSIFICATION <span>{recognizing ? "RECOGNIZING" : backendReady ? "READY" : "WAITING"}</span></div>
         </div>
-        <div className="absolute bottom-4 right-4 rounded-md border border-border bg-background/80 px-3 py-2 font-mono text-[0.65rem] text-muted-foreground backdrop-blur-md">STATUS: {online ? "PROCESSING" : "WAITING FOR BACKEND"}</div>
+        <div className="absolute bottom-4 right-4 rounded-md border border-border bg-background/80 px-3 py-2 font-mono text-[0.65rem] text-muted-foreground backdrop-blur-md">STATUS: {!cameraReady ? "WAITING FOR CAMERA" : !backendReady ? "WAITING FOR BACKEND" : handDetected ? "RECOGNIZING" : "SEARCHING FOR HAND"}</div>
       </div>
     </section>
   );

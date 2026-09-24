@@ -19,6 +19,8 @@ env/
 node_modules/
 dist/
 build/
+.output/
+.wrangler/
 .npm
 .eslintcache
 *.local
