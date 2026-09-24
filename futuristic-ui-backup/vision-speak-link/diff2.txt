@@ -1,0 +1,191 @@
+﻿diff --git a/src/routes/patient.tsx b/src/routes/patient.tsx
+index 3596299..5691fd3 100644
+--- a/src/routes/patient.tsx
++++ b/src/routes/patient.tsx
+@@ -1,9 +1,182 @@
+ import { createFileRoute } from "@tanstack/react-router";
+ import { useEffect, useState } from "react";
+-import { CameraFeed, CommunicationHistory, EmergencyModal, HealthcareQuickActions, MessageComposer, RecognitionCard, RecognitionPipeline, SectionLabel } from "@/components/ProductComponents";
++import {
++  CameraFeed,
++  CommunicationHistory,
++  EmergencyModal,
++  HealthcareQuickActions,
++  MessageComposer,
++  RecognitionCard,
++  RecognitionPipeline,
++  SectionLabel,
++} from "@/components/ProductComponents";
+ import { useRecognition } from "@/hooks/useRecognition";
+ import { useApp } from "@/context/AppContext";
++import { EnergyWaves, HolographicHand, ParticleField } from "@/components/visuals";
+ 
+-export const Route = createFileRoute("/patient")({ head:()=>({meta:[{title:"Patient Mode ΓÇö Silent Talk"},{name:"description",content:"Use Silent Talk's camera-ready patient communication workspace."},{property:"og:title",content:"Patient Mode ΓÇö Silent Talk"},{property:"og:description",content:"Camera, recognition, text, speech, and healthcare quick actions in one accessible workspace."},{property:"og:type",content:"website"},{name:"twitter:card",content:"summary_large_image"}]}), component: PatientMode });
++export const Route = createFileRoute("/patient")({
++  head: () => ({
++    meta: [
++      { title: "Patient Mode ΓÇö Silent Talk" },
++      {
++        name: "description",
++        content: "Use Silent Talk's camera-ready patient communication workspace.",
++      },
++      { property: "og:title", content: "Patient Mode ΓÇö Silent Talk" },
++      {
++        property: "og:description",
++        content:
++          "Camera, recognition, text, speech, and healthcare quick actions in one accessible workspace.",
++      },
++      { property: "og:type", content: "website" },
++      { name: "twitter:card", content: "summary_large_image" },
++    ],
++  }),
++  component: PatientMode,
++});
+ 
+-function PatientMode(){ const recognition=useRecognition(); const {message,setMessage,history,commitMessage,speak}=useApp(); const [emergency,setEmergency]=useState(false); const [clearing,setClearing]=useState(false); useEffect(()=>{if(recognition.recognizedText) setMessage(recognition.recognizedText)},[recognition.recognizedText,setMessage]); const clear=async()=>{setClearing(true);setMessage("");try{await recognition.reset()}catch{}finally{setClearing(false)}}; const select=(phrase:string)=>{commitMessage(phrase)}; const say=()=>{commitMessage(message);speak(message)}; return <div className="page-wrap"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><SectionLabel>Patient mode</SectionLabel><h1 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">Communication workspace</h1></div><p className={`status-copy ${recognition.status}`}>{recognition.status === "offline" ? "Backend disconnected" : recognition.status === "online" ? "Recognition backend connected" : "Connecting to recognition backend"}</p></div><div className="mt-8 grid gap-5 xl:grid-cols-[1.55fr_.75fr]"><CameraFeed online={recognition.status === "online"}/><RecognitionCard recognizedCharacter={recognition.recognizedCharacter} confidence={recognition.confidence} status={recognition.status === "online" ? "Receiving backend data" : "Waiting for backend"}/></div><div className="mt-5"><RecognitionPipeline active={recognition.status === "online"}/></div><div className="mt-8 grid gap-5 xl:grid-cols-[1.5fr_.8fr]"><MessageComposer value={message} setValue={setMessage} onClear={clear} onSpeak={say} clearing={clearing}/><CommunicationHistory entries={history}/></div><div className="mt-8"><HealthcareQuickActions onSelect={select} onEmergency={()=>setEmergency(true)}/></div><EmergencyModal open={emergency} onOpenChange={setEmergency} onSpeak={()=>{commitMessage("I NEED IMMEDIATE HELP");speak("I NEED IMMEDIATE HELP");setEmergency(false)}}/></div> }
+\ No newline at end of file
++function PatientMode() {
++  const [liveActive, setLiveActive] = useState(true);
++  const [streamKey, setStreamKey] = useState(0);
++  const [streamError, setStreamError] = useState(false);
++  const recognition = useRecognition(liveActive);
++  const { message, setMessage, history, commitMessage, speak } = useApp();
++  const [emergency, setEmergency] = useState(false);
++  const [clearing, setClearing] = useState(false);
++  useEffect(() => {
++    if (recognition.recognizedText) setMessage(recognition.recognizedText);
++  }, [recognition.recognizedText, setMessage]);
++  const clear = async () => {
++    setClearing(true);
++    setMessage("");
++    try {
++      await recognition.reset();
++    } catch {
++    } finally {
++      setClearing(false);
++    }
++  };
++  const select = (phrase: string) => {
++    commitMessage(phrase);
++  };
++  const say = () => {
++    commitMessage(message);
++    speak(message);
++  };
++  return (
++    <div className="page-wrap">
++      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
++        <div>
++          <SectionLabel>Patient mode / live workspace</SectionLabel>
++          <h1 className="mt-3 font-display text-4xl font-semibold uppercase sm:text-5xl">
++            Communication workspace
++          </h1>
++          <p className="mt-3 text-muted-foreground">
++            Real-time assistive communication powered by computer vision.
++          </p>
++        </div>
++        <p className={`status-copy ${recognition.status}`}>
++          {recognition.status === "offline"
++            ? "Backend disconnected"
++            : recognition.status === "online"
++              ? "Recognition backend connected"
++              : "Connecting to recognition backend"}
++        </p>
++      </div>
++      <section className="command-hero holo-card relative mt-8 min-h-[25rem] overflow-hidden rounded-3xl border border-primary/25 p-6 sm:p-10">
++        <ParticleField dense />
++        <EnergyWaves className="bottom-0 left-0 w-full opacity-50" />
++        <div className="relative z-10 max-w-md pt-4 sm:pt-10">
++          <SectionLabel>Silent Talk AI engine / live signal</SectionLabel>
++          <h2 className="mt-5 font-display text-4xl font-semibold uppercase leading-[.95] sm:text-6xl">
++            Gesture to
++            <br />
++            <span className="text-primary">understanding.</span>
++          </h2>
++          <div className="mt-7 flex flex-wrap gap-2 font-mono text-[.6rem] tracking-[.14em] text-muted-foreground">
++            <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-primary">
++              SYSTEM / ONLINE
++            </span>
++            <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-2 text-accent">
++              AI ENGINE / ACTIVE
++            </span>
++          </div>
++        </div>
++        <div className="absolute -right-8 top-[-10%] w-[58%] min-w-[22rem] sm:right-[2%] sm:top-[-18%] sm:w-[52%]">
++          <HolographicHand />
++        </div>
++      </section>
++      <div className="mt-8">
++        <CameraFeed
++          online={recognition.status === "online" && !streamError}
++          active={liveActive}
++          streamKey={streamKey}
++          recognizedCharacter={recognition.recognizedCharacter}
++          confidence={recognition.confidence}
++          handDetected={recognition.handDetected}
++          onToggle={() => {
++            setLiveActive((current) => {
++              if (current) return false;
++              setStreamError(false);
++              setStreamKey((key) => key + 1);
++              return true;
++            });
++          }}
++          onStreamError={() => setStreamError(true)}
++        />
++      </div>
++      <div className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
++        <MessageComposer
++          value={message}
++          setValue={setMessage}
++          onClear={clear}
++          onSpeak={say}
++          clearing={clearing}
++          title="Translated text"
++        />
++        <RecognitionCard
++          recognizedCharacter={recognition.recognizedCharacter}
++          confidence={recognition.confidence}
++          handDetected={recognition.handDetected}
++          status={
++            recognition.status === "online" ? "Receiving backend data" : "Waiting for backend"
++          }
++        />
++      </div>
++      <div className="mt-5">
++        <RecognitionPipeline active={recognition.status === "online"} />
++      </div>
++      <div className="mt-8 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
++        <HealthcareQuickActions onSelect={select} onEmergency={() => setEmergency(true)} />
++        <CommunicationHistory entries={history} />
++      </div>
++      <section className="emergency-glass mt-8 flex flex-col items-start justify-between gap-5 rounded-3xl border p-6 sm:flex-row sm:items-center sm:p-8">
++        <div className="flex items-center gap-4">
++          <span className="grid size-14 place-items-center rounded-2xl bg-destructive/15 text-destructive">
++            <span className="text-2xl">!</span>
++          </span>
++          <div>
++            <SectionLabel>Emergency mode</SectionLabel>
++            <p className="mt-2 font-display text-2xl font-semibold">Immediate assistance</p>
++          </div>
++        </div>
++        <button
++          type="button"
++          className="inline-flex h-12 items-center justify-center rounded-xl bg-destructive px-6 text-sm font-bold text-destructive-foreground shadow-[0_0_30px_rgba(255,53,93,.35)] transition hover:scale-[1.02]"
++          onClick={() => setEmergency(true)}
++        >
++          OPEN EMERGENCY MODE
++        </button>
++      </section>
++      <EmergencyModal
++        open={emergency}
++        onOpenChange={setEmergency}
++        onSpeak={() => {
++          commitMessage("I NEED IMMEDIATE HELP");
++          speak("I NEED IMMEDIATE HELP");
++          setEmergency(false);
++        }}
++      />
++    </div>
++  );
++}

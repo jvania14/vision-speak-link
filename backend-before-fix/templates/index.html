@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silent Talk</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Silent Talk | Samsung SFT</h1>
+        <div class="video-container">
+            <img src="{{ url_for('video_feed') }}" id="video-feed" alt="Video Feed">
+        </div>
+        <div class="output-container">
+            <h2>Translated Text:</h2>
+            <div id="translated-text" class="translated-text"></div>
+        </div>
+        <button onclick="setStableTime()">Set Hold Time</button>
+        <button onclick="resetText()">Reset Text</button>
+        
+        <div class="settings">
+            <label for="stable-time-input">Hold Time (seconds):</label>
+            <input type="number" id="stable-time-input" step="0.1" min="0" value="1.5">
+        </div>
+    </div>
+
+    <script>
+        function fetchTranslatedText() {
+            fetch('/get_text')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('translated-text').textContent = data.text;
+                })
+                .catch(error => console.error('Error fetching translated text:', error));
+        }
+
+        function resetText() {
+            fetch('/reset_text', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('translated-text').textContent = "";
+                    }
+                })
+                .catch(error => console.error('Error resetting text:', error));
+        }
+
+        function setStableTime() {
+            const stableTime = document.getElementById('stable-time-input').value;
+            fetch('/set_stable_time', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'stable_time=' + stableTime,
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('Hold time set to', data.stable_time, 'seconds');
+                    }
+                })
+                .catch(error => console.error('Error setting stable time:', error));
+        }
+
+        setInterval(fetchTranslatedText, 1000);  // Fetch text every second
+    </script>
+</body>
+</html>
