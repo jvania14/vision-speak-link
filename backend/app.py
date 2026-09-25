@@ -4,6 +4,7 @@ import math
 import os
 import pickle
 import threading
+import urllib.request
 import uuid
 from datetime import datetime, timedelta
 import cv2
@@ -62,18 +63,33 @@ def send_message(message: str) -> str:
         print(f"OpenAI error: {err}")
         return message
 
-# MediaPipe Hands: static frames from /predict (same min_detection_confidence as original).
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
-
-# Independent JPEG frames from each visitor: static_image_mode matches the
-# original still-frame pipeline. Do not change landmark feature extraction.
-hands = mp_hands.Hands(
-    static_image_mode=True,
-    max_num_hands=1,
-    min_detection_confidence=0.3,
+# ---------------------------------------------------------------------------
+# MEDIAPIPE HAND LANDMARKER (new Tasks API — legacy mp.solutions.hands was
+# removed by Google in mediapipe 0.10.30+; every wheel available on PyPI for
+# this platform is past that point, so we use HandLandmarker instead).
+# Feature extraction math (42-D vector) is unchanged.
+# ---------------------------------------------------------------------------
+MODEL_TASK_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+MODEL_TASK_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/latest/hand_landmarker.task"
 )
+
+if not os.path.exists(MODEL_TASK_PATH):
+    print("Downloading hand_landmarker.task model...", flush=True)
+    urllib.request.urlretrieve(MODEL_TASK_URL, MODEL_TASK_PATH)
+    print("Download complete.", flush=True)
+
+from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import vision as mp_vision
+
+_base_options = mp_tasks.BaseOptions(model_asset_path=MODEL_TASK_PATH)
+_hand_options = mp_vision.HandLandmarkerOptions(
+    base_options=_base_options,
+    num_hands=1,
+    min_hand_detection_confidence=0.3,
+)
+hand_landmarker = mp_vision.HandLandmarker.create_from_options(_hand_options)
 hands_lock = threading.Lock()
 
 # Existing model.p classes are string labels "0".."25" (see model.classes_).
@@ -89,16 +105,18 @@ LETTER_COOLDOWN_SECONDS = float(os.getenv("RECOGNITION_LETTER_COOLDOWN_SECONDS",
 DEBUG_RECOGNITION = os.getenv("DEBUG_RECOGNITION", "0") == "1"
 
 
-def extract_42_features(hand_landmarks) -> list[float]:
-    """Original pipeline: 21 landmarks, (x-min_x, y-min_y) pairs, length 42."""
-    x_ = [landmark.x for landmark in hand_landmarks.landmark]
-    y_ = [landmark.y for landmark in hand_landmarks.landmark]
+def extract_42_features(hand_landmarks_list) -> list[float]:
+    """Original pipeline: 21 landmarks, (x-min_x, y-min_y) pairs, length 42.
+    hand_landmarks_list is a plain list of landmark objects with .x/.y (new
+    Tasks API shape), not the old .landmark-wrapped object."""
+    x_ = [lm.x for lm in hand_landmarks_list]
+    y_ = [lm.y for lm in hand_landmarks_list]
     min_x = min(x_)
     min_y = min(y_)
     data_aux: list[float] = []
-    for landmark in hand_landmarks.landmark:
-        data_aux.append(landmark.x - min_x)
-        data_aux.append(landmark.y - min_y)
+    for lm in hand_landmarks_list:
+        data_aux.append(lm.x - min_x)
+        data_aux.append(lm.y - min_y)
     return data_aux
 
 
@@ -117,10 +135,11 @@ def map_model_class(raw_prediction) -> tuple[str, str]:
 
 
 def infer_from_bgr_frame(frame):
-    """Run MediaPipe + existing model.p. Does not mutate model.p."""
+    """Run MediaPipe HandLandmarker + existing model.p. Does not mutate model.p."""
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
     with hands_lock:
-        results = hands.process(frame_rgb)
+        detection_result = hand_landmarker.detect(mp_image)
 
     payload = {
         "hand_detected": False,
@@ -132,14 +151,14 @@ def infer_from_bgr_frame(frame):
         "landmarks": [],
     }
 
-    if not results.multi_hand_landmarks:
+    if not detection_result.hand_landmarks:
         if DEBUG_RECOGNITION:
             print("DEBUG_RECOGNITION hand_detected=False", flush=True)
         return payload
 
-    hand_landmarks = results.multi_hand_landmarks[0]
-    landmarks_list = [{"x": float(lm.x), "y": float(lm.y)} for lm in hand_landmarks.landmark]
-    data_aux = extract_42_features(hand_landmarks)
+    hand_landmarks_list = detection_result.hand_landmarks[0]
+    landmarks_list = [{"x": float(lm.x), "y": float(lm.y)} for lm in hand_landmarks_list]
+    data_aux = extract_42_features(hand_landmarks_list)
 
     prediction = model.predict([np.asarray(data_aux)])
     predicted_class, letter = map_model_class(prediction[0])
@@ -155,7 +174,7 @@ def infer_from_bgr_frame(frame):
     payload.update(
         {
             "hand_detected": True,
-            "landmark_count": len(hand_landmarks.landmark),
+            "landmark_count": len(hand_landmarks_list),
             "feature_count": len(data_aux),
             "predicted_class": predicted_class,
             "letter": letter,
@@ -195,7 +214,6 @@ def get_or_create_session(session_id: str | None = None) -> tuple[str, dict]:
     global sessions
     with sessions_lock:
         now = datetime.now()
-        # Clean up stale sessions older than 2 hours to avoid memory leaks
         stale_threshold = now - timedelta(hours=2)
         stale_keys = [sid for sid, s in sessions.items() if s.get("last_seen", now) < stale_threshold]
         for sid in stale_keys:
@@ -224,12 +242,6 @@ def get_or_create_session(session_id: str | None = None) -> tuple[str, dict]:
         return session_id, sessions[session_id]
 
 
-# ---------------------------------------------------------------------------
-# PUBLIC MULTI-USER ENDPOINT: /predict
-# Receives a compressed frame from any user's browser webcam.
-# Runs MediaPipe, extracts the SAME 42 features, runs existing model.p,
-# and returns isolated prediction + 21 hand landmarks for HUD overlay.
-# ---------------------------------------------------------------------------
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify(
@@ -345,9 +357,6 @@ def predict_debug():
     )
 
 
-# ---------------------------------------------------------------------------
-# SESSION-ISOLATED TEXT & BUFFER CONTROL
-# ---------------------------------------------------------------------------
 @app.route("/get_text", methods=["GET"])
 def get_text():
     session_id = request.args.get("session_id") or request.headers.get("X-Session-Id")
@@ -399,7 +408,8 @@ def reset_text():
 
 
 # ---------------------------------------------------------------------------
-# LEGACY SERVER-CAMERA STREAM (LOCAL FALLBACK)
+# LEGACY SERVER-CAMERA STREAM (LOCAL FALLBACK) — landmark drawing simplified
+# to plain cv2 circles since mp_drawing (legacy API) no longer exists.
 # ---------------------------------------------------------------------------
 CAMERA_INDEX = 1
 FALLBACK_CAMERA_INDICES = (0, 2, 3)
@@ -425,18 +435,15 @@ def detect_asl(cap):
             if not ret:
                 break
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = None
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
             with hands_lock:
-                results = hands.process(frame_rgb)
-            if results.multi_hand_landmarks:
-                for hand_landmarks in results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(
-                        frame,
-                        hand_landmarks,
-                        mp_hands.HAND_CONNECTIONS,
-                        mp_drawing_styles.get_default_hand_landmarks_style(),
-                        mp_drawing_styles.get_default_hand_connections_style()
-                    )
+                detection_result = hand_landmarker.detect(mp_image)
+            if detection_result.hand_landmarks:
+                h, w, _ = frame.shape
+                for hand_landmarks_list in detection_result.hand_landmarks:
+                    for lm in hand_landmarks_list:
+                        cx, cy = int(lm.x * w), int(lm.y * h)
+                        cv2.circle(frame, (cx, cy), 4, (0, 217, 255), -1)
             ret, buffer = cv2.imencode(".jpg", frame)
             if not ret:
                 continue
@@ -457,7 +464,6 @@ def video_feed():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-
     app.run(
         host="0.0.0.0",
         port=port,
