@@ -1,268 +1,506 @@
-<a name="readme-top"></a>
+Silent Talk
 
-<div align="center">
-  <h3 align="center">Silent Talk</h3>
+AI-Powered ASL Communication Assistant for Healthcare
 
-  <p align="center">
-    AI-powered ASL fingerspelling recognition for healthcare communication
-  </p>
+Silent Talk is a healthcare communication prototype designed to help
+Deaf and speech-impaired patients communicate with doctors and
+healthcare staff using American Sign Language (ASL) fingerspelling.
 
-  <p align="center">
-    <a href="https://youtu.be/MuX_m5dPpj4?si=ENCBESx-YJvemE78">
-      <img src="https://img.shields.io/badge/▶_Watch_Demo_Video-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Demo Video" />
-    </a>
-  </p>
+The system uses a device camera to detect hand gestures, recognizes
+individual ASL fingerspelled letters, and converts them into text
+through a real-time communication interface.
 
-  <p align="center">
-    <img src="https://img.shields.io/badge/Award-Samsung_Solve_for_Tomorrow_Top_30-blue?style=for-the-badge&logo=samsung&logoColor=white" alt="Samsung Award" />
-    <br />
-    <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/jvania14/vision-speak-link?style=for-the-badge" alt="License" />
-    </a>
-  </p>
-</div>
+Current scope: Silent Talk recognizes individual fingerspelled
+letters from single-hand poses. It is not a complete continuous ASL
+translation system.
 
-## Table of Contents
+Problem
 
-- [About The Project](#about-the-project)
-- [Which app is this?](#which-app-is-this)
-- [Architecture](#architecture)
-- [ASL Recognition Pipeline](#asl-recognition-pipeline)
-- [Tech Stack](#tech-stack)
-- [Environment Variables](#environment-variables)
-- [Local Development](#local-development)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
-- [Known Limitations](#known-limitations)
-- [License](#license)
+Communication between Deaf or speech-impaired patients and healthcare
+professionals can become difficult when an interpreter is not
+immediately available.
 
-## About The Project
+In a healthcare environment, patients may need to communicate symptoms,
+requests, discomfort, or basic information quickly and clearly.
 
-**Silent Talk** helps Deaf and speech-impaired patients communicate with healthcare
-providers by recognizing ASL fingerspelling from a live browser webcam feed and turning
-it into text (and speech) in real time. It recognizes individual fingerspelled letters
-from single hand poses; it does not translate continuous/fluent sign language.
+Silent Talk explores a technology-assisted way to support this
+communication using a camera and AI-based hand gesture recognition.
 
-This project was originally built as a **Top 30 Semifinalist** (out of 300+ teams) entry
-in the **Samsung Solve for Tomorrow 2024** competition, and has since been rebuilt into a
-Patient Mode / Doctor Mode / Accessibility healthcare communication workspace.
+Solution
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Silent Talk combines:
 
-## Which app is this?
+Real-time browser camera input
 
-This repository contains **three** frontend efforts from its history. Only one is live:
+AI-based hand landmark detection
 
-| Path | Status | What it is |
-|---|---|---|
-| `src/` (this repo's root) | ✅ **Canonical, actively developed** | TanStack Start app — Home, Patient Mode, Doctor Mode, How It Works, Accessibility. This is the app the deployment configuration below targets. |
-| `frontend/` | ⚠️ Legacy, unused | An earlier, unrelated Vite/React "smart home" hackathon prototype (NextUI + react-router). Not imported by anything live, not part of any deploy. Kept for reference only — **do not point a deployment at this directory.** |
-| `backend/vision-speak-link/` | ❌ Removed | Was a broken/dangling git submodule reference with no `.gitmodules` entry (pointed at an empty, unresolvable commit). Untracked as part of repo cleanup. |
+Machine-learning based gesture classification
 
-The Flask backend (`backend/`) is shared by all of the above, but only `src/` actually
-talks to it correctly (see below).
+ASL fingerspelling recognition
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Real-time text generation
 
-## Architecture
+Patient Mode
 
-```
-Browser (src/ — TanStack Start)          Flask backend (backend/app.py)
-┌─────────────────────────────┐          ┌───────────────────────────────┐
-│ useRecognition hook          │  frame   │ POST /predict                 │
-│  - getUserMedia(video)       │ ───────► │  - decode image (cv2)         │
-│  - <canvas> grabs a frame    │  every   │  - MediaPipe Hands (21 pts)   │
-│    every ~300ms, JPEG/base64 │  ~300ms  │  - 42-feature vector          │
-│  - session_id (per tab)      │          │  - model.p (RandomForest)     │
-│                               │ ◄─────── │  - per-session stable-letter  │
-│  - hand_detected / letter /   │  JSON    │    buffering + cooldown       │
-│    confidence / text          │          └───────────────────────────────┘
-└─────────────────────────────┘
-```
+Doctor Mode
 
-Each browser tab generates its own `session_id` (`crypto.randomUUID()`), so multiple
-patients/devices can use the same backend deployment concurrently without mixing up
-recognized text.
+Accessibility-focused interface
 
-The backend also exposes legacy endpoints (`/video_feed`, `/get_text`, `/reset_text`)
-that stream from a **physical camera attached to the server itself**. These only work for
-local development on a machine with a webcam plugged into it, and intentionally return
-`503` in any real deployment (no server has a webcam) — real recognition always goes
-through the browser-webcam-based `/predict` flow described above.
+ASL Neural Library
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Futuristic healthcare AI interface
 
-## ASL Recognition Pipeline
+How It Works
 
-1. **Capture** — `useRecognition` (`src/hooks/useRecognition.ts`) requests
-   `getUserMedia`, binds the stream to a `<video>` element, and grabs a frame onto a
-   hidden `<canvas>` every ~300ms as a JPEG data URL.
-2. **Predict** — the frame + `session_id` are POSTed to `/predict`
-   (`src/services/api.ts` → `backend/app.py`).
-3. **Detect** — the backend decodes the image, converts BGR→RGB, and runs
-   MediaPipe Hands (`static_image_mode=True, max_num_hands=1,
-   min_detection_confidence=0.3`) to get 21 hand landmarks.
-4. **Classify** — landmarks are turned into the same 42-value feature vector used at
-   training time (`extract_42_features` in `app.py`, matching `train_model.py`), which is
-   fed into the existing `model.p` (`RandomForestClassifier`) to get a letter + confidence.
-5. **Stabilize** — a letter is only appended to the session's text buffer once it has
-   repeated for `RECOGNITION_STABLE_FRAMES` consecutive frames above
-   `RECOGNITION_CONFIDENCE_THRESHOLD`, with a `RECOGNITION_LETTER_COOLDOWN_SECONDS` cooldown
-   before the same letter can commit twice in a row (prevents one held pose from spamming
-   the same letter).
-6. **Display / speak** — the frontend renders `hand_detected`, the live predicted letter +
-   confidence, and the accumulated text, and can speak the composed message aloud.
+                  SILENT TALK
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+              ┌─────────────────┐
+              │ Browser Camera  │
+              └────────┬────────┘
+                       │
+                       ▼
+              ┌─────────────────────┐
+              │ MediaPipe Hand      │
+              │ Landmarker          │
+              │ Runs in Browser     │
+              └──────────┬──────────┘
+                         │
+                    21 landmarks
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Flask Backend       │
+              │                     │
+              │ Feature Extraction  │
+              │ 21 → 42 features    │
+              └──────────┬──────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Machine Learning    │
+              │ Random Forest       │
+              │ model.p             │
+              └──────────┬──────────┘
+                         │
+                    Letter + Confidence
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Silent Talk UI      │
+              │ Letter → Text       │
+              └─────────────────────┘
 
-## Tech Stack
+Recognition Pipeline
 
-**Frontend** (`src/`): React 19, TanStack Start/Router, Vite, Tailwind CSS 4, deployed via
-the Nitro `cloudflare-module` preset (Cloudflare Workers/Pages).
+The browser requests camera access using getUserMedia().
 
-**Backend** (`backend/`): Flask 3, Flask-CORS, MediaPipe, OpenCV, scikit-learn
-(RandomForestClassifier), gunicorn, optional OpenAI (`gpt-4o-mini`) for word-spacing
-cleanup of fingerspelled sequences.
+MediaPipe Hand Landmarker detects the hand directly in the browser.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+The system extracts 21 hand landmarks.
 
-## Environment Variables
+The 21 landmarks are converted into a 42-feature representation.
 
-**Frontend** — copy `.env.example` to `.env`:
+The 42 features are sent to the Flask /predict endpoint.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `VITE_API_BASE_URL` | `http://127.0.0.1:5000` | Base URL of the Flask backend. |
+The trained model.p classifier predicts the corresponding letter.
 
-**Backend** — copy `backend/.env.example` to `backend/.env`:
+Recognition stability logic prevents one held gesture from
+repeatedly adding the same character.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `FRONTEND_ORIGIN` | `*` (see `backend/.env.example`) | Comma-separated allowed CORS origin(s). Use a real origin in production. |
-| `OPENAI_API_KEY` | unset | Optional. Recognition works without it; only word-spacing cleanup is skipped. |
-| `MAX_FRAME_BYTES` | `3145728` (3MB) | Max accepted request body size. |
-| `RECOGNITION_CONFIDENCE_THRESHOLD` | `0.30` | Minimum model confidence to accept a predicted letter. |
-| `RECOGNITION_STABLE_FRAMES` | `3` | Consecutive matching frames required before committing a letter. |
-| `RECOGNITION_LETTER_COOLDOWN_SECONDS` | `0.8` | Cooldown before the same letter can commit again. |
-| `DEBUG_RECOGNITION` | `0` | Set to `1` to log per-frame detection/prediction to the server console. |
+The frontend displays the predicted letter, confidence, and
+accumulated text.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Main Features
 
-## Local Development
+Patient Mode
 
-### Prerequisites
+Patient Mode provides the primary ASL communication interface.
 
-* Python 3.9+
-* Node.js & npm (or bun)
+The patient can use the camera to make fingerspelling gestures and see
+the recognized letters in the interface.
 
-### Backend
+Doctor Mode
 
-```bash
+Doctor Mode provides a healthcare-oriented interface for receiving and
+understanding patient communication.
+
+ASL Neural Library
+
+The ASL Neural Library provides a visual reference for ASL
+fingerspelling gestures supported by the prototype.
+
+Accessibility
+
+The project includes a dedicated accessibility-focused interface
+intended to make the communication experience easier to use.
+
+Futuristic AI Interface
+
+The application uses a futuristic healthcare/AI visual design with:
+
+Glassmorphism-style panels
+
+Animated components
+
+HUD-inspired elements
+
+AI visualizations
+
+Interactive cards
+
+Holographic hand visuals
+
+Real-time recognition feedback
+
+Technology Stack
+
+Frontend
+
+React
+
+TypeScript
+
+TanStack Start
+
+TanStack Router
+
+Vite
+
+Tailwind CSS
+
+Framer Motion
+
+MediaPipe Tasks Vision
+
+Browser getUserMedia() API
+
+Backend
+
+Python
+
+Flask
+
+Flask-CORS
+
+NumPy
+
+scikit-learn
+
+Machine Learning
+
+Random Forest Classifier
+
+MediaPipe Hand Landmarker
+
+21 hand landmarks
+
+42 normalized landmark features
+
+ASL fingerspelling classification
+
+Deployment
+
+Frontend: Vercel
+
+Backend: Render
+
+Project Structure
+
+silent-talk/
+│
+├── backend/
+│   ├── app.py
+│   ├── model.p
+│   ├── requirements.txt
+│   └── ...
+│
+├── src/
+│   ├── components/
+│   │   ├── ProductComponents.tsx
+│   │   ├── ASLNeuralLibrary.tsx
+│   │   └── ...
+│   │
+│   ├── hooks/
+│   │   └── useRecognition.ts
+│   │
+│   ├── routes/
+│   │   ├── patient.tsx
+│   │   ├── doctor.tsx
+│   │   ├── asl-library.tsx
+│   │   ├── accessibility.tsx
+│   │   └── how-it-works.tsx
+│   │
+│   └── services/
+│       └── api.ts
+│
+├── public/
+│   ├── asl/
+│   └── videos/
+│
+├── package.json
+└── README.md
+
+Local Setup
+
+Requirements
+
+Python 3.9+
+
+Node.js
+
+npm
+
+Modern browser
+
+Webcam
+
+1. Clone the repository
+
+git clone <repository-url>
+cd silent-talk
+
+2. Install frontend dependencies
+
+npm install
+
+3. Setup the backend
+
+Windows
+
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+macOS / Linux
+
 cd backend
 python3 -m venv venv
-source venv/bin/activate       # venv\Scripts\activate on Windows
+source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env           # edit as needed
-python3 app.py                 # serves on http://127.0.0.1:5000
-```
 
-### Frontend
+4. Start the backend
 
-```bash
-cp .env.example .env           # edit VITE_API_BASE_URL if the backend runs elsewhere
-npm install
-npm run dev                    # serves on http://127.0.0.1:8080
-```
+python app.py
 
-Open `http://127.0.0.1:8080/patient` and grant camera permission when prompted.
+The backend uses the hosting platform's PORT environment variable when
+available and defaults to port 10000 locally.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+5. Start the frontend
 
-## Testing
+Open another terminal in the project root:
 
-Backend (from `backend/`, with the venv above active):
+npm run dev
 
-```bash
-python3 test_all_letters.py      # exercises /predict-debug against sample frames
-python3 debug_recognition.py     # verbose single-frame debug helper
-curl http://127.0.0.1:5000/health
-```
+Open the local application and allow camera access when prompted.
 
-Frontend:
+API
 
-```bash
-npx tsc --noEmit   # typecheck
-npm run build      # production build
-```
+Health Check
 
-Browser-dependent behavior (camera permission prompts, live webcam frame quality, and
-end-to-end recognition accuracy against a real hand) requires manual verification in an
-actual browser with a webcam — it cannot be exercised in a headless/CI environment.
+GET /health
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Example response:
 
-## Deployment
+{
+  "status": "ok",
+  "model_loaded": true,
+  "model_type": "RandomForestClassifier",
+  "n_features_in": 42,
+  "recognition_mode": "browser-landmarks-to-model"
+}
 
-Camera access via `getUserMedia` requires a **secure context** — HTTPS in production, or
-`localhost` for local development. A plain-HTTP production deploy will silently fail to
-request the camera.
+ASL Prediction
 
-**Frontend** (`src/`): builds via `@lovable.dev/vite-tanstack-config`'s Nitro
-`cloudflare-module` preset (`npm run build` → `.output/`), i.e. it's set up to deploy as a
-Cloudflare Worker/Pages site by default. Set `VITE_API_BASE_URL` to your deployed backend's
-URL at build time.
+POST /predict
+Content-Type: application/json
 
-**Backend** (`backend/`): ships with both a `Procfile` (`gunicorn -b :$PORT app:app`, e.g.
-for Heroku-style platforms) and an `app.yaml` (Google App Engine, `runtime: python39`).
-Before deploying:
-- Set `FRONTEND_ORIGIN` in your hosting environment to your real deployed frontend origin
-  (do not leave it as `*` in production).
-- Set `OPENAI_API_KEY` if you want fingerspelling word-spacing cleanup.
-- `model.p` ships in the repo and is loaded at startup — no extra model download step
-  needed.
+Example structure:
 
-`frontend/` has its own `vercel.json`; it is **not** part of the deployed app and should
-not be targeted by any deployment.
+{
+  "session_id": "example-session",
+  "landmarks": [
+    {"x": 0.20, "y": 0.20}
+  ]
+}
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+The real request contains all 21 landmarks.
 
-## Troubleshooting
+The response contains information such as:
 
-* **"Camera unavailable" / permission prompt never appears** — check you're on
-  `localhost` or HTTPS; browsers block `getUserMedia` on plain HTTP origins other than
-  localhost.
-* **Camera works but stuck on "Searching for hand"** — check `VITE_API_BASE_URL` actually
-  points at a reachable backend, and check the backend logs (`DEBUG_RECOGNITION=1`) to
-  confirm frames are arriving and MediaPipe is running.
-* **CORS errors in the browser console** — set `FRONTEND_ORIGIN` on the backend to match
-  the frontend's actual origin exactly (scheme + host + port).
-* **`pip install -r requirements.txt` fails to find a mediapipe wheel** — you're likely on
-  an unsupported Python/platform combination for the pinned `mediapipe` version; check
-  [PyPI's mediapipe file list](https://pypi.org/project/mediapipe/#files) for wheels
-  matching your platform.
+{
+  "letter": "A",
+  "confidence": 0.85,
+  "hand_detected": true,
+  "landmark_count": 21,
+  "feature_count": 42,
+  "predicted_class": "0",
+  "session_id": "example-session",
+  "text": ""
+}
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Environment Variables
 
-## Known Limitations
+Frontend
 
-* **Model accuracy is imperfect.** Direct verification against the repo's own sample
-  images (`backend/A.jpg`–`D.jpg`) showed correct predictions for 2 of 4 letters, with
-  confidence scores in the 0.43–0.56 range across all four. Hand detection itself works
-  correctly on all four; the classifier (`model.p`, a `RandomForestClassifier`) sometimes
-  confuses visually similar hand shapes. Improving this requires more/better training data
-  (`backend/collect_dataset.py`, `backend/train_model.py`), not a pipeline fix.
-* **No continuous/fluent sign language support** — only discrete fingerspelled letters.
-* **Legacy server-camera endpoints** (`/video_feed`, `/get_text`, `/reset_text` without a
-  session) only work when a webcam is physically attached to the machine running Flask;
-  they are not used by the live frontend and exist only as a local fallback.
-* **`frontend/` is unmaintained legacy code** from an earlier, unrelated prototype — see
-  [Which app is this?](#which-app-is-this).
+VITE_API_BASE_URL=http://127.0.0.1:10000
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+For production, set this to the deployed backend URL.
 
-## License
+Backend
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
+PORT=10000
+FRONTEND_ORIGIN=*
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+For production, configure CORS for the actual frontend origin.
+
+Testing
+
+Backend health
+
+curl.exe http://127.0.0.1:10000/health
+
+Backend landmark prediction
+
+The /predict endpoint expects 21 hand landmarks.
+
+A successful request should return:
+
+HTTP 200
+hand_detected: true
+landmark_count: 21
+feature_count: 42
+letter: <predicted letter>
+
+Frontend production build
+
+npm run build
+
+Deployment
+
+Backend
+
+The backend can be deployed to Render or another Python hosting service.
+
+Ensure that:
+
+model.p is included
+
+requirements.txt is installed
+
+Flask uses the platform-provided PORT
+
+CORS is configured for the frontend
+
+The backend does not depend on a physical server webcam
+
+Frontend
+
+Set:
+
+VITE_API_BASE_URL=<deployed-backend-url>
+
+Then build and deploy the frontend.
+
+Camera access requires HTTPS in production.
+
+Troubleshooting
+
+Camera does not start
+
+Check:
+
+Browser camera permission
+
+HTTPS or localhost
+
+Browser support for getUserMedia()
+
+Whether another application is using the camera
+
+Camera works but no letter appears
+
+Check the browser Network tab for:
+
+/predict
+
+Verify that the request contains 21 landmarks.
+
+Also check:
+
+/health
+
+and confirm that the model is loaded.
+
+/predict returns 400
+
+The current endpoint expects JSON landmarks rather than the old
+multipart JPEG format.
+
+Use:
+
+{
+  "session_id": "example",
+  "landmarks": [
+    {"x": 0.1, "y": 0.2}
+  ]
+}
+
+with all 21 points.
+
+Backend returns 502 after deployment
+
+Check the hosting logs for:
+
+Python startup errors
+
+Missing model.p
+
+Dependency installation errors
+
+Incorrect port configuration
+
+Application crashes
+
+The current architecture performs hand landmark detection in the
+browser, so the deployed backend does not need a server-side webcam.
+
+Current Limitations
+
+The current system recognizes individual fingerspelled letters
+rather than continuous ASL sentences.
+
+Recognition quality depends on the existing training data and
+classifier.
+
+Similar hand shapes may occasionally be classified incorrectly.
+
+Lighting, camera quality, hand position, motion blur, and occlusion
+can affect recognition.
+
+Browser-side MediaPipe currently requires access to its required
+runtime/model assets.
+
+Future Development
+
+Possible future improvements include:
+
+Larger and more diverse ASL training dataset
+
+Improved classification accuracy
+
+Continuous sign-language recognition
+
+Word and sentence-level recognition
+
+Better robustness across lighting and camera conditions
+
+More healthcare communication workflows
+
+Stronger privacy and on-device processing
+
+Multilingual communication support
+
+License
+
+This project is distributed under the MIT License.
