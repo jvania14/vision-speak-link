@@ -25,7 +25,7 @@ MarkupSafe==2.1.5
 mediapipe==0.10.30
 numpy>=1.26.4,<2
 openai==1.37.0
-opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
 packaging==24.1
 pandas==2.3.3
 pillow==10.4.0
